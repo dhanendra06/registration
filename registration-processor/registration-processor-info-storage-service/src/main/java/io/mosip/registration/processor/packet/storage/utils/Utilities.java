@@ -4,16 +4,21 @@ import java.io.IOException;
 import java.text.DateFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
-import java.time.Duration;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.Period;
+import java.time.*;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import io.mosip.kernel.core.idvalidator.exception.InvalidIDException;
+import io.mosip.kernel.core.idvalidator.spi.VidValidator;
+import io.mosip.registration.processor.core.constant.AbisConstant;
+import io.mosip.registration.processor.core.exception.*;
+import io.mosip.registration.processor.core.idrepo.dto.IdResponseDTO;
+import io.mosip.registration.processor.core.packet.dto.AdditionalInfoRequestDto;
+import io.mosip.registration.processor.core.workflow.dto.WorkflowInstanceRequestDTO;
+import io.mosip.registration.processor.status.service.AdditionalInfoRequestService;
 import org.apache.commons.lang.StringUtils;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
@@ -34,10 +39,6 @@ import io.mosip.registration.processor.core.common.rest.dto.ErrorDTO;
 import io.mosip.registration.processor.core.constant.LoggerFileConstant;
 import io.mosip.registration.processor.core.constant.MappingJsonConstants;
 import io.mosip.registration.processor.core.constant.ProviderStageName;
-import io.mosip.registration.processor.core.exception.ApisResourceAccessException;
-import io.mosip.registration.processor.core.exception.PacketManagerException;
-import io.mosip.registration.processor.core.exception.RegistrationProcessorCheckedException;
-import io.mosip.registration.processor.core.exception.RegistrationProcessorUnCheckedException;
 import io.mosip.registration.processor.core.exception.util.PlatformErrorMessages;
 import io.mosip.registration.processor.core.idrepo.dto.IdResponseDTO1;
 import io.mosip.registration.processor.core.idrepo.dto.ResponseDTO;
@@ -160,6 +161,12 @@ public class Utilities {
 	@Value("#{'${registration.processor.queue.trusted.packages}'.split(',')}")
 	private List<String> trustedPackages;
 
+	@Value("#{'${registration.processor.main-processes}'.split(',')}")
+	private List<String> mainProcesses;
+
+	@Value("${registration.processor.vid-support-for-update:false}")
+	private Boolean isVidSupportedForUpdate;
+
 	@Autowired
 	private PacketInfoDao packetInfoDao;
 
@@ -173,6 +180,14 @@ public class Utilities {
 	/** The packet info manager. */
 	@Autowired
 	private PacketInfoManager<Identity, ApplicantInfoDto> packetInfoManager;
+
+	@Autowired
+	private AdditionalInfoRequestService additionalInfoRequestService;
+
+	/** The vid validator. */
+	@Autowired
+	private VidValidator<String> vidValidator;
+
 
 	/** The Constant INBOUNDQUEUENAME. */
 	private static final String INBOUNDQUEUENAME = "inboundQueueName";
@@ -593,11 +608,16 @@ public class Utilities {
 		regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(), id,
 				"Utilities::getUIn()::entry");
 		String UIN = packetManagerService.getFieldByMappingJsonKey(id, MappingJsonConstants.UIN, process, stageName);
+		if(isVidSupportedForUpdate && StringUtils.isNotEmpty(UIN) && validateVid(UIN)) {
+			regProcLogger.debug("VID structure validated successfully");
+			JSONObject responseJson = retrieveIdrepoJson(UIN);
+			if (responseJson != null) {
+				UIN = JsonUtil.getJSONValue(responseJson, AbisConstant.UIN);
+			}
+		}
 		regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(), id,
 				"Utilities::getUIn()::exit");
-
 		return UIN;
-
 	}
 
 	/**
@@ -856,4 +876,30 @@ public class Utilities {
 		return centerId + "_" + machineId;
 	}
 
+public String getInternalProcess(Map<String, String> additionalProcessMap, String externalProcess){
+		if (externalProcess == null) return "";
+		String internalProcess = additionalProcessMap.get(externalProcess);
+		return internalProcess != null ? internalProcess : "";
+	}
+
+	public int getIterationForSyncRecord(Map<String, String> additionalProcessMap, String process, String additionalRequestId) throws IOException {
+		if(mainProcesses.contains(process) || mainProcesses.contains(getInternalProcess(additionalProcessMap, process)))
+			return 1;
+		AdditionalInfoRequestDto additionalInfoRequestDto = additionalInfoRequestService
+				.getAdditionalInfoRequestByReqId(additionalRequestId);
+		if (additionalInfoRequestDto == null)
+			throw new AdditionalInfoIdNotFoundException();
+
+		return additionalInfoRequestDto.getAdditionalInfoIteration();
+	}
+
+	public boolean validateVid(String vid) {
+		regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+				"Utilities::validateVid()::entry");
+		try {
+			return vidValidator.validateId(vid);
+		} catch (InvalidIDException e) {
+			return false;
+		}
+	}
 }
