@@ -2,17 +2,18 @@ package io.mosip.registration.processor.stages.app.constants;
 
 public class DemoDedupeConstants {
 
+	// Prevent instantiation
+    private DemoDedupeConstants() {
+        throw new UnsupportedOperationException("Utility class cannot be instantiated");
+    }
+    
 	public static final String FINGERTYPE = "fingerType";
-
 	/** The Constant FILE_SEPARATOR. */
 	public static final String FILE_SEPARATOR = "\\";
-
 	/** The Constant USER. */
 	public static final String USER = "MOSIP_SYSTEM";
-
 	/** The Constant CREATED_BY. */
 	public static final String CREATED_BY = "MOSIP";
-
 	/** The Constant IDENTIFY. */
 	public static final String IDENTIFY = "IDENTIFY";
 

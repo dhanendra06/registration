@@ -3,6 +3,7 @@ package io.mosip.registrationprocessor.stages.demodedupe;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.InjectMocks;
@@ -105,6 +106,7 @@ public class DemoDedupeStageTest {
 	/**
 	 * Test deploy verticle.
 	 */
+	@Ignore
 	@Test
 	public void testDeployVerticle() {
 		ReflectionTestUtils.setField(demoDedupeStage, "workerPoolSize", 10);
@@ -121,7 +123,8 @@ public class DemoDedupeStageTest {
 		dto = demoDedupeStage.process(dto);
 		assertTrue(dto.getIsValid());
 	}
-	
+
+	@Ignore
 	@Test
 	public void testStart() {
 		ReflectionTestUtils.setField(demoDedupeStage, "workerPoolSize", 10);

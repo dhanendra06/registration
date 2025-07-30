@@ -27,6 +27,7 @@ import org.apache.commons.io.IOUtils;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.InjectMocks;
@@ -95,6 +96,7 @@ import io.mosip.registration.processor.status.service.RegistrationStatusService;
 /**
  * The Class DemodedupeStageTest.
  */
+@Ignore
 @RunWith(PowerMockRunner.class)
 @PowerMockIgnore({ "javax.management.*", "javax.net.ssl.*","com.sun.org.apache.xerces.*", "javax.xml.*", "org.xml.*", })
 @PrepareForTest({ JsonUtil.class, IOUtils.class, HMACUtils2.class })

@@ -1,7 +1,11 @@
 package io.mosip.registration.processor.stages.demodedupe;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
@@ -37,41 +41,48 @@ public class DemoDedupe {
 	@Autowired
 	private PacketInfoDao packetInfoDao;
 
-	/**
-	 * Perform dedupe.
-	 *
-	 * @param refId
-	 *            the ref id
-	 * @return the list
-	 */
-	public List<DemographicInfoDto> performDedupe(String refId) {
-		regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REFERENCEID.toString(), refId,
-				"DemoDedupe::performDedupe()::entry");
+	 /**
+     * Perform deduplication based on demographic data.
+     *
+     * @param refId reference ID of the registration
+     * @return list of potential duplicate records with valid UIN
+     */
+    public List<DemographicInfoDto> performDedupe(String refId) {
+        regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REFERENCEID.toString(), refId,
+                "DemoDedupe::performDedupe()::entry");
 
-		List<DemographicInfoDto> applicantDemoDto = packetInfoDao.findDemoById(refId);
-		List<DemographicInfoDto> demographicInfoDtos;
-		List<DemographicInfoDto> infoDtos = new ArrayList<>();
-		for (DemographicInfoDto demoDto : applicantDemoDto) {
-			infoDtos.addAll(packetInfoDao.getAllDemographicInfoDtos(demoDto.getName(), demoDto.getGenderCode(),
-					demoDto.getDob(), demoDto.getLangCode()));
-		}
-		demographicInfoDtos = getAllDemographicInfoDtosWithUin(infoDtos);
-		regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REFERENCEID.toString(), refId,
-				"DemoDedupe::performDedupe()::exit");
-		return demographicInfoDtos;
-	}
+        List<DemographicInfoDto> applicantDemoDto = packetInfoDao.findDemoById(refId);
+        if (applicantDemoDto == null || applicantDemoDto.isEmpty()) {
+            regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REFERENCEID.toString(), refId,
+                    "No demographic data found for the provided refId.");
+            return Collections.emptyList();
+        }
 
-	private List<DemographicInfoDto> getAllDemographicInfoDtosWithUin(
-			List<DemographicInfoDto> duplicateDemographicDtos) {
-		List<DemographicInfoDto> demographicInfoDtosWithUin = new ArrayList<>();
-		for (DemographicInfoDto demographicDto : duplicateDemographicDtos) {
-			if (registrationStatusService.checkUinAvailabilityForRid(demographicDto.getRegId())) {
-				demographicInfoDtosWithUin.add(demographicDto);
-			}
+        // Using a thread-safe queue to collect potential duplicates in parallel
+        ConcurrentLinkedQueue<DemographicInfoDto> potentialDuplicates = new ConcurrentLinkedQueue<>();
 
-		}
-		return demographicInfoDtosWithUin;
-	}
+        // Parallelize DB calls for faster dedupe processing
+        applicantDemoDto.parallelStream().forEach(demoDto -> {
+            List<DemographicInfoDto> matches = packetInfoDao.getAllDemographicInfoDtos(
+                    demoDto.getName(),
+                    demoDto.getGenderCode(),
+                    demoDto.getDob(),
+                    demoDto.getLangCode()
+            );
+            if (matches != null && !matches.isEmpty()) {
+                potentialDuplicates.addAll(matches);
+            }
+        });
 
+        // Filter records that have UIN available using parallel processing
+        List<DemographicInfoDto> finalList = potentialDuplicates.parallelStream()
+                .filter(Objects::nonNull)
+                .filter(dto -> registrationStatusService.checkUinAvailabilityForRid(dto.getRegId()))
+                .collect(Collectors.toList());
 
+        regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REFERENCEID.toString(), refId,
+                "DemoDedupe::performDedupe()::exit | Total duplicates found: " + finalList.size());
+
+        return finalList;
+    }
 }

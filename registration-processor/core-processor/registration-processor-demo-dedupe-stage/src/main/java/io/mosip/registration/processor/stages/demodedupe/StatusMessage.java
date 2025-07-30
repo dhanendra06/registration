@@ -9,8 +9,9 @@ public final class StatusMessage {
 	 * Instantiates a new status message.
 	 */
 	private StatusMessage() {
-		
+		throw new UnsupportedOperationException("StatusMessage class cannot be instantiated");
 	}
+	
 	public static final String POTENTIAL_MATCH_FOUND="Potential match found for registration id";
 
 	/** The Constant PACKET_DEMO_DEDUPE_SUCCESSFUL. */
@@ -22,6 +23,4 @@ public final class StatusMessage {
 	public static final String POTENTIAL_MATCH_FOUND_IN_ABIS="Potential match found in abis response for registration id :";
 	
 	public static final String DEMO_DEDUPE_FAILED_IN_ABIS ="Packet demo dedupe failed in abis";
-
-	
 }
