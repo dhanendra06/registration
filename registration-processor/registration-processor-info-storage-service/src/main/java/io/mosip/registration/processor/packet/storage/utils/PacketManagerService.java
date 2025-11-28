@@ -12,35 +12,29 @@ import jakarta.annotation.PostConstruct;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-import io.mosip.registration.processor.packet.storage.dto.BiometricRequestDto;
-import io.mosip.registration.processor.packet.storage.dto.DeleteTagRequestDTO;
-import io.mosip.registration.processor.packet.storage.dto.DeleteTagResponseDTO;
-import io.mosip.registration.processor.packet.storage.dto.DocumentDto;
-import io.mosip.registration.processor.packet.storage.dto.FieldDto;
-import io.mosip.registration.processor.packet.storage.dto.FieldDtos;
-import io.mosip.registration.processor.packet.storage.dto.FieldResponseDto;
-import io.mosip.registration.processor.packet.storage.dto.InfoDto;
-import io.mosip.registration.processor.packet.storage.dto.InfoRequestDto;
-import io.mosip.registration.processor.packet.storage.dto.InfoResponseDto;
-import io.mosip.registration.processor.packet.storage.dto.UpdateTagRequestDto;
-import io.mosip.registration.processor.packet.storage.dto.ValidatePacketResponse;
 
+import io.mosip.registration.processor.packet.storage.dto.*;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
 import io.mosip.kernel.biometrics.entities.BiometricRecord;
 import io.mosip.kernel.core.logger.spi.Logger;
 import io.mosip.kernel.core.util.DateUtils2;
 import io.mosip.kernel.core.util.exception.JsonProcessingException;
+
 import io.mosip.registration.processor.core.code.ApiName;
 import io.mosip.registration.processor.core.common.rest.dto.ErrorDTO;
 import io.mosip.registration.processor.core.constant.LoggerFileConstant;
 import io.mosip.registration.processor.core.exception.ApisResourceAccessException;
 import io.mosip.registration.processor.core.exception.PacketManagerException;
 import io.mosip.registration.processor.core.exception.PacketManagerNonRecoverableException;
+
 import io.mosip.registration.processor.core.http.RequestWrapper;
 import io.mosip.registration.processor.core.http.ResponseWrapper;
+
 import io.mosip.registration.processor.core.logger.RegProcessorLogger;
 import io.mosip.registration.processor.core.spi.restclient.RegistrationProcessorRestClientService;
+
 import io.mosip.registration.processor.packet.storage.exception.ObjectDoesnotExistsException;
 
 @Component
@@ -51,6 +45,7 @@ public class PacketManagerService {
     private static final String ID = "mosip.commmons.packetmanager";
     private static final String VERSION = "v1";
     private static final String ERR_NOT_EXISTS = "KER-PUT-027";
+
     private static final List<String> NON_RECOVERABLE =
             Arrays.asList("KER-PUT-019");
 
@@ -66,14 +61,12 @@ public class PacketManagerService {
     }
 
     /* =======================================================================
-       CORE FAST-PATH HELPERS
+       ERROR HANDLING
        ======================================================================= */
-
     private void failFast(String method, String id, ErrorDTO err) throws PacketManagerException {
         String code = err.getErrorCode();
         String msg = err.getMessage();
 
-        // ultra-light log (no JSON conversion)
         log.error(
                 LoggerFileConstant.SESSIONID.toString(),
                 LoggerFileConstant.REGISTRATIONID.toString(),
@@ -111,9 +104,9 @@ public class PacketManagerService {
     /* =======================================================================
        FIELDS
        ======================================================================= */
-
     public String getField(String id, String field, String source, String process)
-            throws ApisResourceAccessException, PacketManagerException, JsonProcessingException, IOException {
+            throws ApisResourceAccessException, PacketManagerException,
+            JsonProcessingException, IOException {
 
         FieldDto dto = new FieldDto(id, field, source, process, false);
 
@@ -131,7 +124,8 @@ public class PacketManagerService {
     }
 
     public Map<String, String> getFields(String id, List<String> fields, String source, String process)
-            throws ApisResourceAccessException, PacketManagerException, JsonProcessingException, IOException {
+            throws ApisResourceAccessException, PacketManagerException,
+            JsonProcessingException, IOException {
 
         FieldDtos dto = new FieldDtos(id, fields, source, process, false);
 
@@ -147,42 +141,33 @@ public class PacketManagerService {
     /* =======================================================================
        DOCUMENT
        ======================================================================= */
-
-    public io.mosip.registration.processor.packet.storage.dto.Document
-    getDocument(String id, String documentName, String process)
-            throws ApisResourceAccessException, PacketManagerException, JsonProcessingException, IOException {
+    public Document getDocument(String id, String documentName, String process)
+            throws ApisResourceAccessException, PacketManagerException,
+            JsonProcessingException, IOException {
         return getDocument(id, documentName, null, process);
     }
 
-    public io.mosip.registration.processor.packet.storage.dto.Document
-    getDocument(String id, String documentName, String source, String process)
-            throws ApisResourceAccessException, PacketManagerException, JsonProcessingException, IOException {
+    public Document getDocument(String id, String documentName, String source, String process)
+            throws ApisResourceAccessException, PacketManagerException,
+            JsonProcessingException, IOException {
 
         DocumentDto dto = new DocumentDto(id, documentName, source, process);
 
-        @SuppressWarnings("unchecked")
-        ResponseWrapper<io.mosip.registration.processor.packet.storage.dto.Document> resp =
-                (ResponseWrapper<io.mosip.registration.processor.packet.storage.dto.Document>)
-                        restApi.postApi(
-                                ApiName.PACKETMANAGER_SEARCH_DOCUMENT,
-                                "",
-                                "",
-                                req(dto),
-                                ResponseWrapper.class
-                        );
+        ResponseWrapper<Document> resp =
+                (ResponseWrapper<Document>) restApi.postApi(
+                        ApiName.PACKETMANAGER_SEARCH_DOCUMENT, "", "", req(dto), ResponseWrapper.class);
 
         checkErrors("getDocument", id, resp.getErrors());
 
-        return convert(resp.getResponse(), io.mosip.registration.processor.packet.storage.dto.Document.class);
+        return convert(resp.getResponse(), Document.class);
     }
-
 
     /* =======================================================================
        VALIDATE
        ======================================================================= */
-
     public ValidatePacketResponse validate(String id, String source, String process)
-            throws ApisResourceAccessException, PacketManagerException, JsonProcessingException, IOException {
+            throws ApisResourceAccessException, PacketManagerException,
+            JsonProcessingException, IOException {
 
         InfoDto dto = new InfoDto(id, source, process, false);
 
@@ -191,16 +176,15 @@ public class PacketManagerService {
                         ApiName.PACKETMANAGER_VALIDATE, "", "", req(dto), ResponseWrapper.class);
 
         checkErrors("validate", id, resp.getErrors());
-
         return convert(resp.getResponse(), ValidatePacketResponse.class);
     }
 
     /* =======================================================================
        AUDITS
        ======================================================================= */
-
     public List<FieldResponseDto> getAudits(String id, String src, String process)
-            throws ApisResourceAccessException, PacketManagerException, JsonProcessingException, IOException {
+            throws ApisResourceAccessException, PacketManagerException,
+            JsonProcessingException, IOException {
 
         InfoDto dto = new InfoDto(id, src, process, false);
 
@@ -211,23 +195,21 @@ public class PacketManagerService {
         checkErrors("getAudits", id, resp.getErrors());
 
         List<Object> raw = resp.getResponse();
-        if (raw == null || raw.isEmpty()) return new ArrayList<>(0);
+        if (raw == null || raw.isEmpty()) return new ArrayList<>();
 
-        int size = raw.size();
-        List<FieldResponseDto> list = new ArrayList<>(size);
-        for (int i = 0; i < size; i++)
-            list.add(convert(raw.get(i), FieldResponseDto.class));
-
-        return list;
+        List<FieldResponseDto> out = new ArrayList<>(raw.size());
+        for (Object o : raw)
+            out.add(convert(o, FieldResponseDto.class));
+        return out;
     }
 
     /* =======================================================================
        BIOMETRICS
        ======================================================================= */
-
     public BiometricRecord getBiometrics(String id, String person, List<String> mods,
                                          String source, String process)
-            throws ApisResourceAccessException, PacketManagerException, JsonProcessingException, IOException {
+            throws ApisResourceAccessException, PacketManagerException,
+            JsonProcessingException, IOException {
 
         BiometricRequestDto dto = new BiometricRequestDto(id, person, mods, source, process, false);
 
@@ -236,16 +218,15 @@ public class PacketManagerService {
                         ApiName.PACKETMANAGER_SEARCH_BIOMETRICS, "", "", req(dto), ResponseWrapper.class);
 
         checkErrors("getBiometrics", id, resp.getErrors());
-
         return convert(resp.getResponse(), BiometricRecord.class);
     }
 
     /* =======================================================================
        META INFO
        ======================================================================= */
-
     public Map<String, String> getMetaInfo(String id, String source, String process)
-            throws ApisResourceAccessException, PacketManagerException, JsonProcessingException, IOException {
+            throws ApisResourceAccessException, PacketManagerException,
+            JsonProcessingException, IOException {
 
         InfoDto dto = new InfoDto(id, source, process, false);
 
@@ -254,16 +235,15 @@ public class PacketManagerService {
                         ApiName.PACKETMANAGER_SEARCH_METAINFO, "", "", req(dto), ResponseWrapper.class);
 
         checkErrors("getMetaInfo", id, resp.getErrors());
-
         return convert(resp.getResponse(), FieldResponseDto.class).getFields();
     }
 
     /* =======================================================================
        INFO
        ======================================================================= */
-
     public InfoResponseDto info(String id)
-            throws ApisResourceAccessException, PacketManagerException, JsonProcessingException, IOException {
+            throws ApisResourceAccessException, PacketManagerException,
+            JsonProcessingException, IOException {
 
         InfoRequestDto dto = new InfoRequestDto(id);
 
@@ -272,16 +252,15 @@ public class PacketManagerService {
                         ApiName.PACKETMANAGER_INFO, "", "", req(dto), ResponseWrapper.class);
 
         checkErrors("info", id, resp.getErrors());
-
         return convert(resp.getResponse(), InfoResponseDto.class);
     }
 
     /* =======================================================================
        TAGS
        ======================================================================= */
-
     public void addOrUpdateTags(String id, Map<String, String> tags)
-            throws ApisResourceAccessException, PacketManagerException, JsonProcessingException, IOException {
+            throws ApisResourceAccessException, PacketManagerException,
+            JsonProcessingException, IOException {
 
         UpdateTagRequestDto dto = new UpdateTagRequestDto(id, tags);
 
@@ -293,7 +272,8 @@ public class PacketManagerService {
     }
 
     public void deleteTags(String id, List<String> tags)
-            throws ApisResourceAccessException, PacketManagerException, JsonProcessingException {
+            throws ApisResourceAccessException, PacketManagerException,
+            JsonProcessingException {
 
         DeleteTagRequestDTO dto = new DeleteTagRequestDTO(id, tags);
 
@@ -305,12 +285,14 @@ public class PacketManagerService {
     }
 
     public Map<String, String> getAllTags(String id)
-            throws ApisResourceAccessException, PacketManagerException, JsonProcessingException, IOException {
+            throws ApisResourceAccessException, PacketManagerException,
+            JsonProcessingException, IOException {
         return getTags(id, null);
     }
 
     public Map<String, String> getTags(String id, List<String> tagNames)
-            throws ApisResourceAccessException, PacketManagerException, JsonProcessingException, IOException {
+            throws ApisResourceAccessException, PacketManagerException,
+            JsonProcessingException, IOException {
 
         TagRequestDto dto = new TagRequestDto(id, tagNames);
 
@@ -321,7 +303,7 @@ public class PacketManagerService {
         List<ErrorDTO> errors = resp.getErrors();
         if (errors != null && !errors.isEmpty()) {
             ErrorDTO e = errors.get(0);
-            if ("KER-PUT-024".equalsIgnoreCase(e.getErrorCode())) return null; // original behavior
+            if ("KER-PUT-024".equalsIgnoreCase(e.getErrorCode())) return null;
             failFast("getTags", id, e);
         }
 
