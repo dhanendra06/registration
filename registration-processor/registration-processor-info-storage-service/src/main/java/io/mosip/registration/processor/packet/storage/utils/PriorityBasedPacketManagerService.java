@@ -1,7 +1,13 @@
 package io.mosip.registration.processor.packet.storage.utils;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.assertj.core.util.Lists;
@@ -36,24 +42,15 @@ public class PriorityBasedPacketManagerService {
     @Autowired
     private PacketManagerService packetManagerService;
 
-    /**
-     * Global provider configuration –
-     * initialized from outside, same as original.
-     */
     private static Map<String, String> providerConfiguration;
 
     public static void initialize(Map<String, String> provider) {
         providerConfiguration = provider;
     }
 
-    private static Map<String, String> getProviderConfiguration() {
-        return providerConfiguration == null ? Collections.emptyMap() : providerConfiguration;
-    }
-
-    /* ====================================================================
-       FIELD ACCESS (BY MAPPING JSON)
-       ==================================================================== */
-
+    /**
+     * Get fields by mapping json Constant key.
+     */
     public String getFieldByMappingJsonKey(String id, String key, String process, ProviderStageName stageName)
             throws ApisResourceAccessException, PacketManagerException,
             JsonProcessingException, IOException {
@@ -63,12 +60,14 @@ public class PriorityBasedPacketManagerService {
 
         String field = JsonUtil.getJSONValue(
                 JsonUtil.getJSONObject(regProcessorIdentityJson, key),
-                MappingJsonConstants.VALUE
-        );
+                MappingJsonConstants.VALUE);
 
         return getField(id, field, process, stageName);
     }
 
+    /**
+     * Get all fields by mapping json keys (single shot).
+     */
     public Map<String, String> getAllFieldsByMappingJsonKeys(String id, String process, ProviderStageName stageName)
             throws ApisResourceAccessException, PacketManagerException,
             JsonProcessingException, IOException {
@@ -80,15 +79,20 @@ public class PriorityBasedPacketManagerService {
         for (Object key : regProcessorIdentityJson.keySet()) {
             String field = JsonUtil.getJSONValue(
                     JsonUtil.getJSONObject(regProcessorIdentityJson, key),
-                    MappingJsonConstants.VALUE
-            );
-            // preserve original split logic
-            fields.addAll(Arrays.asList(field.split(",")));
+                    MappingJsonConstants.VALUE);
+            // handle comma-separated mapping values
+            for (String f : field.split(",")) {
+                fields.add(f.trim());
+            }
         }
 
         return getFields(id, fields, process, stageName);
     }
 
+    /**
+     * Get single field by priority set in configuration
+     * (delegates to getFields to reuse batching).
+     */
     public String getField(String id, String field, String process, ProviderStageName stageName)
             throws ApisResourceAccessException, PacketManagerException,
             JsonProcessingException, IOException {
@@ -101,27 +105,24 @@ public class PriorityBasedPacketManagerService {
                 : null;
     }
 
-    public Map<String, String> getFields(String id,
-                                         List<String> fields,
-                                         String process,
-                                         ProviderStageName stageName)
+    /**
+     * Get fields by priority set in configuration.
+     * This now minimizes remote calls by batching fields per container.
+     */
+    public Map<String, String> getFields(String id, List<String> fields, String process, ProviderStageName stageName)
             throws ApisResourceAccessException, PacketManagerException,
             JsonProcessingException, IOException {
 
-        if (CollectionUtils.isEmpty(fields)) {
-            return Collections.emptyMap();
-        }
-
-        Map<String, String> fieldMap = new HashMap<>(fields.size());
         List<String> priorityList = new ArrayList<>();
         List<String> nonPriorityList = new ArrayList<>();
+        Map<String, String> fieldMap = new HashMap<>();
 
-        Map<String, String> keyMap = PacketManagerHelper.getKeyMap(stageName, getProviderConfiguration());
+        Map<String, String> keyMap = PacketManagerHelper.getKeyMap(stageName, providerConfiguration);
 
-        // Partition into fields with priority and those without
-        if (!keyMap.isEmpty()) {
+        // Split fields into priority vs non-priority based on configuration
+        if (!CollectionUtils.isEmpty(keyMap)) {
             for (String field : fields) {
-                if (packetManagerHelper.isFieldPresent(field, stageName, getProviderConfiguration())) {
+                if (packetManagerHelper.isFieldPresent(field, stageName, providerConfiguration)) {
                     priorityList.add(field);
                 } else {
                     nonPriorityList.add(field);
@@ -131,111 +132,84 @@ public class PriorityBasedPacketManagerService {
             nonPriorityList.addAll(fields);
         }
 
-        // Priority fields – use priority algorithm (may change source/process)
-        if (!priorityList.isEmpty()) {
+        // Priority fields (optimized batching)
+        if (!CollectionUtils.isEmpty(priorityList)) {
             fieldMap.putAll(getFieldsByPriority(id, stageName, priorityList));
         }
 
-        // Non-priority fields – direct multi-field call, single source+process (null, process)
-        if (!nonPriorityList.isEmpty()) {
-            fieldMap.putAll(
-                    packetManagerService.getFields(id, nonPriorityList, null, process)
-            );
+        // Non-priority fields → simple single call
+        if (!CollectionUtils.isEmpty(nonPriorityList)) {
+            fieldMap.putAll(packetManagerService.getFields(id, nonPriorityList, null, process));
         }
 
         return fieldMap;
     }
 
-    /* ====================================================================
-       META INFO / DOCUMENT / VALIDATE / AUDITS
-       ==================================================================== */
-
-    public Map<String, String> getMetaInfo(String id,
-                                           String process,
-                                           ProviderStageName stageName)
+    /**
+     * Get meta info by priority.
+     */
+    public Map<String, String> getMetaInfo(String id, String process, ProviderStageName stageName)
             throws ApisResourceAccessException, PacketManagerException,
             JsonProcessingException, IOException {
 
         ContainerInfoDto containerInfoDto =
                 findSourceAndProcessByPriority(id, MappingJsonConstants.METAINFO, stageName);
 
-        if (containerInfoDto != null) {
-            return packetManagerService.getMetaInfo(
-                    id,
-                    containerInfoDto.getSource(),
-                    containerInfoDto.getProcess()
-            );
-        }
-
-        return packetManagerService.getMetaInfo(id, null, process);
+        return (containerInfoDto != null)
+                ? packetManagerService.getMetaInfo(id, containerInfoDto.getSource(), containerInfoDto.getProcess())
+                : packetManagerService.getMetaInfo(id, null, process);
     }
 
-    public Document getDocument(String id,
-                                String documentName,
-                                String process,
-                                ProviderStageName stageName)
+    /**
+     * Get document by priority.
+     */
+    public Document getDocument(String id, String documentName, String process, ProviderStageName stageName)
             throws ApisResourceAccessException, PacketManagerException,
             JsonProcessingException, IOException {
 
         ContainerInfoDto containerInfoDto =
                 findSourceAndProcessByPriority(id, documentName, stageName);
 
-        if (containerInfoDto == null) {
-            return packetManagerService.getDocument(id, documentName, process);
-        }
-
-        return packetManagerService.getDocument(
-                id,
-                documentName,
+        return (containerInfoDto != null)
+                ? packetManagerService.getDocument(id, documentName,
                 containerInfoDto.getSource(),
-                containerInfoDto.getProcess()
-        );
+                containerInfoDto.getProcess())
+                : packetManagerService.getDocument(id, documentName, process);
     }
 
-    public ValidatePacketResponse validate(String id,
-                                           String process,
-                                           ProviderStageName stageName)
+    /**
+     * Validate packet by priority.
+     */
+    public ValidatePacketResponse validate(String id, String process, ProviderStageName stageName)
             throws ApisResourceAccessException, PacketManagerException,
             JsonProcessingException, IOException {
 
         ContainerInfoDto containerInfoDto =
                 findSourceAndProcessByPriority(id, MappingJsonConstants.VALIDATE, stageName);
 
-        if (containerInfoDto == null) {
-            return packetManagerService.validate(id, null, process);
-        }
-
-        return packetManagerService.validate(
-                id,
-                containerInfoDto.getSource(),
-                containerInfoDto.getProcess()
-        );
+        return (containerInfoDto != null)
+                ? packetManagerService.validate(id, containerInfoDto.getSource(), containerInfoDto.getProcess())
+                : packetManagerService.validate(id, null, process);
     }
 
-    public List<FieldResponseDto> getAudits(String id,
-                                            String process,
-                                            ProviderStageName stageName)
+    /**
+     * Get audits by priority.
+     */
+    public List<FieldResponseDto> getAudits(String id, String process, ProviderStageName stageName)
             throws ApisResourceAccessException, PacketManagerException,
             JsonProcessingException, IOException {
 
         ContainerInfoDto containerInfoDto =
                 findSourceAndProcessByPriority(id, MappingJsonConstants.AUDITS, stageName);
 
-        if (containerInfoDto == null) {
-            return packetManagerService.getAudits(id, null, process);
-        }
-
-        return packetManagerService.getAudits(
-                id,
-                containerInfoDto.getSource(),
-                containerInfoDto.getProcess()
-        );
+        return (containerInfoDto != null)
+                ? packetManagerService.getAudits(id, containerInfoDto.getSource(), containerInfoDto.getProcess())
+                : packetManagerService.getAudits(id, null, process);
     }
 
-    /* ====================================================================
-       BIOMETRICS
-       ==================================================================== */
-
+    /**
+     * Get biometrics by priority with mapping json key as input.
+     */
     public BiometricRecord getBiometricsByMappingJsonKey(String id,
                                                          String mappingJsonKey,
                                                          String process,
@@ -246,14 +220,15 @@ public class PriorityBasedPacketManagerService {
         String biometricLabel = JsonUtil.getJSONValue(
                 JsonUtil.getJSONObject(
                         utilities.getRegistrationProcessorMappingJson(MappingJsonConstants.IDENTITY),
-                        mappingJsonKey
-                ),
-                MappingJsonConstants.VALUE
-        );
+                        mappingJsonKey),
+                MappingJsonConstants.VALUE);
 
         return getBiometrics(id, biometricLabel, process, stageName);
     }
 
+    /**
+     * Get biometrics by priority (no modalities filter).
+     */
     public BiometricRecord getBiometrics(String id,
                                          String person,
                                          String process,
@@ -264,6 +239,9 @@ public class PriorityBasedPacketManagerService {
         return getBiometricsInternal(id, person, null, process, stageName);
     }
 
+    /**
+     * Get biometrics by priority (with modalities filter).
+     */
     public BiometricRecord getBiometrics(String id,
                                          String person,
                                          List<String> modalities,
@@ -275,6 +253,10 @@ public class PriorityBasedPacketManagerService {
         return getBiometricsInternal(id, person, modalities, process, stageName);
     }
 
+    /* =====================================================================
+       INTERNAL BIOMETRIC LOGIC
+       ===================================================================== */
+
     private BiometricRecord getBiometricsInternal(String id,
                                                   String person,
                                                   List<String> modalities,
@@ -283,76 +265,63 @@ public class PriorityBasedPacketManagerService {
             throws IOException, ApisResourceAccessException,
             PacketManagerException, JsonProcessingException {
 
-        Map<String, String> keyMap =
-                PacketManagerHelper.getKeyMap(stageName, getProviderConfiguration());
+        Map<String, String> baseKeyMap =
+                PacketManagerHelper.getKeyMap(stageName, providerConfiguration);
 
-        Map<String, String> finalKeyMap;
+        Map<String, String> finalKeyMap = baseKeyMap.isEmpty()
+                ? null
+                : baseKeyMap.entrySet().stream()
+                .filter(entry -> entry.getKey().contains(person))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
-        if (keyMap.isEmpty()) {
-            finalKeyMap = Collections.emptyMap();
-        } else {
-            finalKeyMap = keyMap.entrySet()
-                    .stream()
-                    .filter(e -> e.getKey().contains(person))
-                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-        }
-
-        // No priority configured for this person → direct call
-        if (finalKeyMap.isEmpty()) {
+        // No priority set → default behavior
+        if (CollectionUtils.isEmpty(finalKeyMap)) {
             return packetManagerService.getBiometrics(id, person, modalities, null, process);
         }
 
         InfoResponseDto infoResponseDto = packetManagerService.info(id);
 
-        // If an exact person key exists, use container info directly (single call)
+        // Single config entry for this person (fast path)
         if (finalKeyMap.get(person) != null) {
             ContainerInfoDto containerInfoDto =
                     PacketManagerHelper.getContainerInfo(finalKeyMap, person, infoResponseDto);
-
-            List<String> effectiveModalities = modalities;
-            if (CollectionUtils.isEmpty(effectiveModalities)) {
-                effectiveModalities = PacketManagerHelper.getTypeSubtypeModalities(containerInfoDto);
-            }
+            List<String> containerModalities =
+                    CollectionUtils.isEmpty(modalities)
+                            ? PacketManagerHelper.getTypeSubtypeModalities(containerInfoDto)
+                            : modalities;
 
             return packetManagerService.getBiometrics(
-                    id,
-                    person,
-                    effectiveModalities,
-                    containerInfoDto.getSource(),
-                    containerInfoDto.getProcess()
-            );
+                    id, person, containerModalities,
+                    containerInfoDto.getSource(), containerInfoDto.getProcess());
         }
 
-        // Else, aggregate biometrics from multiple containers
+        // Multiple containers, merge segments
         Set<ContainerInfoDto> containers = new HashSet<>();
+        BiometricRecord biometricRecord = null;
+
         for (String key : finalKeyMap.keySet()) {
             ContainerInfoDto containerInfoDto =
                     PacketManagerHelper.getBiometricContainerInfo(finalKeyMap, person, key, infoResponseDto);
             if (containerInfoDto != null) {
-                containers.add(containerInfoDto); // Set + proper equals/hashCode avoids duplicates
+                Optional<Boolean> optional =
+                        containers.stream().map(c -> c.equals(containerInfoDto)).findAny();
+                if (!optional.isPresent() || Boolean.FALSE.equals(optional.get())) {
+                    containers.add(containerInfoDto);
+                }
             }
         }
 
-        if (containers.isEmpty()) {
-            return null;
-        }
-
-        BiometricRecord biometricRecord = null;
         for (ContainerInfoDto containerInfoDto : containers) {
-            List<String> containerModalities = modalities;
-            if (CollectionUtils.isEmpty(containerModalities)) {
-                containerModalities = PacketManagerHelper.getTypeSubtypeModalities(containerInfoDto);
-            }
+            List<String> containerModalities =
+                    CollectionUtils.isEmpty(modalities)
+                            ? PacketManagerHelper.getTypeSubtypeModalities(containerInfoDto)
+                            : modalities;
 
             BiometricRecord record = packetManagerService.getBiometrics(
-                    id,
-                    person,
-                    containerModalities,
-                    containerInfoDto.getSource(),
-                    containerInfoDto.getProcess()
-            );
+                    id, person, containerModalities,
+                    containerInfoDto.getSource(), containerInfoDto.getProcess());
 
-            if (record != null && record.getSegments() != null && !record.getSegments().isEmpty()) {
+            if (record != null && record.getSegments() != null) {
                 if (biometricRecord == null) {
                     biometricRecord = new BiometricRecord();
                     biometricRecord.setSegments(new ArrayList<>());
@@ -364,99 +333,95 @@ public class PriorityBasedPacketManagerService {
         return biometricRecord;
     }
 
-    /* ====================================================================
-       INTERNAL HELPERS
-       ==================================================================== */
+    /* =====================================================================
+       PRIORITY FIELD HANDLING (OPTIMIZED)
+       ===================================================================== */
 
-    /**
-     * Strong optimization over the original:
-     * - Still preserves behavior
-     * - Groups fields by ContainerInfo so we can call getFields() per container
-     *   instead of getField() per field (reducing external calls).
-     */
     private Map<String, String> getFieldsByPriority(String id,
                                                     ProviderStageName stageName,
                                                     List<String> fields)
             throws ApisResourceAccessException, IOException,
             PacketManagerException, JsonProcessingException {
 
-        Map<String, String> fieldMap = new HashMap<>(fields.size());
-
+        Map<String, String> fieldMap = new HashMap<>();
         InfoResponseDto infoResponseDto = packetManagerService.info(id);
-        Collection<ContainerInfoDto> infos = infoResponseDto.getInfo();
 
-        if (infos == null || infos.isEmpty()) {
-            return fieldMap;
-        }
+        // If there is only one source/container → reuse it for all fields (fast path)
+        if (infoResponseDto.getInfo().size() == 1) {
+            ContainerInfoDto containerInfoDto = infoResponseDto.getInfo().iterator().next();
 
-        // Fast-path: only one source → one call for all fields
-        if (infos.size() == 1) {
-            ContainerInfoDto containerInfoDto = infos.iterator().next();
-            fieldMap.putAll(
+            // Single batched call for all fields
+            Map<String, String> response =
                     packetManagerService.getFields(
                             id,
                             fields,
                             containerInfoDto.getSource(),
-                            containerInfoDto.getProcess()
-                    )
-            );
-        } else {
-            // Multi-source: group fields by ContainerInfo and call getFields per container
-            Map<String, String> keyMap =
-                    PacketManagerHelper.getKeyMap(stageName, getProviderConfiguration());
+                            containerInfoDto.getProcess());
 
-            Map<ContainerInfoDto, List<String>> fieldsByContainer = new HashMap<>();
-
-            for (String field : fields) {
-                ContainerInfoDto containerInfoDto =
-                        PacketManagerHelper.getContainerInfo(keyMap, field, infoResponseDto);
-
-                if (containerInfoDto != null) {
-                    fieldsByContainer
-                            .computeIfAbsent(containerInfoDto, k -> new ArrayList<>())
-                            .add(field);
+            if (response != null) {
+                for (String field : fields) {
+                    String val = response.get(field);
+                    // preserve behavior of getField: "null" string → null
+                    if (val != null && "null".equalsIgnoreCase(val)) {
+                        val = null;
+                    }
+                    fieldMap.put(field, val);
                 }
             }
+            return fieldMap;
+        }
 
-            // Execute batched external calls
-            for (Map.Entry<ContainerInfoDto, List<String>> entry : fieldsByContainer.entrySet()) {
-                ContainerInfoDto c = entry.getKey();
-                List<String> containerFields = entry.getValue();
+        // Multiple sources → group fields by container to minimize remote calls
+        Map<String, String> keyMap = PacketManagerHelper.getKeyMap(stageName, providerConfiguration);
+        if (CollectionUtils.isEmpty(keyMap)) {
+            // safety: if no key map, nothing to resolve here
+            return fieldMap;
+        }
 
-                Map<String, String> values =
-                        packetManagerService.getFields(
-                                id,
-                                containerFields,
-                                c.getSource(),
-                                c.getProcess()
-                        );
-                if (values != null) {
-                    fieldMap.putAll(values);
-                }
+        // Group fields by (source,process) container
+        Map<ContainerInfoDto, List<String>> fieldsByContainer = new HashMap<>();
+
+        for (String field : fields) {
+            ContainerInfoDto containerInfoDto =
+                    PacketManagerHelper.getContainerInfo(keyMap, field, infoResponseDto);
+
+            if (containerInfoDto != null) {
+                fieldsByContainer
+                        .computeIfAbsent(containerInfoDto, k -> new ArrayList<>())
+                        .add(field);
             }
         }
 
-        // Preserve existing additional logic for applicant biometric label
-        Map<String, String> keyMap =
-                PacketManagerHelper.getKeyMap(stageName, getProviderConfiguration());
+        // For each container, fetch all its fields in a single call
+        for (Map.Entry<ContainerInfoDto, List<String>> entry : fieldsByContainer.entrySet()) {
+            ContainerInfoDto containerInfoDto = entry.getKey();
+            List<String> containerFields = entry.getValue();
 
-        List<ContainerInfoDto> infoList = new ArrayList<>(infoResponseDto.getInfo());
-        ContainerInfoDto containerInfoDto =
-                packetManagerHelper.getBiometricSourceAndProcess(fields, keyMap, infoList);
+            Map<String, String> response =
+                    packetManagerService.getFields(
+                            id,
+                            containerFields,
+                            containerInfoDto.getSource(),
+                            containerInfoDto.getProcess());
 
-        if (containerInfoDto != null) {
-            String label = packetManagerHelper.getApplicantBiometricLabel();
-            String labelValue = packetManagerService.getField(
-                    id,
-                    label,
-                    containerInfoDto.getSource(),
-                    containerInfoDto.getProcess()
-            );
-            fieldMap.put(label, labelValue);
+            if (response != null) {
+                for (String field : containerFields) {
+                    String val = response.get(field);
+                    // preserve getField's "null" → null normalization
+                    if (val != null && "null".equalsIgnoreCase(val)) {
+                        val = null;
+                    }
+                    fieldMap.put(field, val);
+                }
+            }
         }
 
         return fieldMap;
     }
+
+    /* =====================================================================
+       PRIORITY RESOLUTION: SOURCE / PROCESS
+       ===================================================================== */
 
     private ContainerInfoDto findSourceAndProcessByPriority(String id,
                                                             String field,
@@ -464,9 +429,7 @@ public class PriorityBasedPacketManagerService {
             throws ApisResourceAccessException, IOException,
             PacketManagerException, JsonProcessingException {
 
-        Map<String, String> keyMap =
-                PacketManagerHelper.getKeyMap(stageName, getProviderConfiguration());
-
+        Map<String, String> keyMap = PacketManagerHelper.getKeyMap(stageName, providerConfiguration);
         if (keyMap != null && keyMap.get(field) != null) {
             InfoResponseDto infoResponseDto = packetManagerService.info(id);
             return PacketManagerHelper.getContainerInfo(keyMap, field, infoResponseDto);
