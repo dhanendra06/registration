@@ -5,7 +5,7 @@ import java.util.*;
 import io.mosip.registration.processor.core.packet.dto.packetmanager.TagRequestDto;
 import io.mosip.registration.processor.core.packet.dto.packetmanager.TagResponseDto;
 import jakarta.annotation.PostConstruct;
-
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.core.env.Environment;
@@ -48,6 +48,7 @@ public class PacketManagerService {
     private static final List<String> NON_RECOVERABLE = Arrays.asList("KER-PUT-019");
 
     @Autowired
+    @Qualifier("selfTokenWebClient")
     private WebClient webClient;
 
     @Autowired
