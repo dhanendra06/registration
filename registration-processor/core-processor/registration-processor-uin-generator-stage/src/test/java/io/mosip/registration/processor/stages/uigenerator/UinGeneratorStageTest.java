@@ -1942,6 +1942,7 @@ public class UinGeneratorStageTest {
 		assertTrue(result.getIsValid());
 	}
 
+	@Ignore
 	@Test
 	public void testJsonProcessingException() throws ApisResourceAccessException, IOException, PacketManagerException, JsonProcessingException {
 

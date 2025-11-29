@@ -334,19 +334,6 @@ public class QualityClassifierStage extends MosipVerticleAPIManager {
 				object.setInternalError(Boolean.TRUE);
 				description.setCode(PlatformErrorMessages.RPR_QCR_BIOMETRIC_EXCEPTION.getCode());
 				description.setMessage(PlatformErrorMessages.RPR_QCR_BIOMETRIC_EXCEPTION.getMessage());
-		} catch (JsonProcessingException e) {
-			regProcLogger.error(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
-					regId, RegistrationStatusCode.FAILED.toString() + e.getMessage()
-							+ org.apache.commons.lang3.exception.ExceptionUtils.getStackTrace(e));
-			registrationStatusDto.setStatusCode(RegistrationStatusCode.FAILED.toString());
-			registrationStatusDto.setStatusComment(trimExceptionMsg
-					.trimExceptionMessage(StatusUtil.JSON_PARSING_EXCEPTION.getMessage() + e.getMessage()));
-			registrationStatusDto.setSubStatusCode(StatusUtil.JSON_PARSING_EXCEPTION.getCode());
-			registrationStatusDto.setLatestTransactionStatusCode(registrationStatusMapperUtil
-					.getStatusCode(RegistrationExceptionTypeCode.JSON_PROCESSING_EXCEPTION));
-			description.setMessage(PlatformErrorMessages.RPR_SYS_JSON_PARSING_EXCEPTION.getMessage());
-			description.setCode(PlatformErrorMessages.RPR_SYS_JSON_PARSING_EXCEPTION.getCode());
-			object.setInternalError(Boolean.TRUE);
 		} catch (IOException e) {
 			regProcLogger.error(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
 					regId, RegistrationStatusCode.FAILED.toString() + e.getMessage()
