@@ -9,6 +9,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 import io.mosip.kernel.core.util.DateUtils2;
@@ -587,20 +591,62 @@ public class AbisHandlerStage extends MosipVerticleAPIManager {
 		String individualBiometricsLabel = JsonUtil.getJSONValue(
 				JsonUtil.getJSONObject(regProcessorIdentityJson, MappingJsonConstants.INDIVIDUAL_BIOMETRICS),
 				MappingJsonConstants.VALUE);
-		BiometricRecord biometricRecord = priorityBasedPacketManagerService.getBiometrics(id, individualBiometricsLabel,
-				policyTypeAndSubTypeList, process, ProviderStageName.BIO_DEDUPE);
 
-		Map<String, String> tags = packetManagerService.getAllTags(id);
-		String ageGroup = tags.get("AGE_GROUP");
+		// Fetch biometrics, tags, and metaInfo in parallel — all three are independent HTTP calls
+		final String bioLabel = individualBiometricsLabel;
+		final List<String> policySubTypeList = policyTypeAndSubTypeList;
+		ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+		CompletableFuture<BiometricRecord> bioFuture;
+		CompletableFuture<Map<String, String>> tagsFuture;
+		CompletableFuture<Map<String, String>> metaInfoFuture;
+		try {
+			bioFuture = CompletableFuture.supplyAsync(() -> {
+				try {
+					return priorityBasedPacketManagerService.getBiometrics(id, bioLabel, policySubTypeList, process, ProviderStageName.BIO_DEDUPE);
+				} catch (Exception e) { throw new CompletionException(e); }
+			}, executor);
+			tagsFuture = CompletableFuture.supplyAsync(() -> {
+				try {
+					return packetManagerService.getAllTags(id);
+				} catch (Exception e) { throw new CompletionException(e); }
+			}, executor);
+			metaInfoFuture = CompletableFuture.supplyAsync(() -> {
+				try {
+					return priorityBasedPacketManagerService.getMetaInfo(id, process, ProviderStageName.BIO_DEDUPE);
+				} catch (Exception e) { throw new CompletionException(e); }
+			}, executor);
+			CompletableFuture.allOf(bioFuture, tagsFuture, metaInfoFuture).join();
+		} finally {
+			executor.close();
+		}
+
+		BiometricRecord biometricRecord;
+		Map<String, String> metaInfo;
+		try {
+			biometricRecord = bioFuture.join();
+			metaInfo = metaInfoFuture.join();
+		} catch (CompletionException e) {
+			Throwable cause = e.getCause() != null ? e.getCause() : e;
+			if (cause instanceof Exception) throw (Exception) cause;
+			throw e;
+		}
+
+		String ageGroup;
+		try {
+			ageGroup = tagsFuture.join().get("AGE_GROUP");
+		} catch (CompletionException e) {
+			Throwable cause = e.getCause() != null ? e.getCause() : e;
+			if (cause instanceof Exception) throw (Exception) cause;
+			throw e;
+		}
 		Map<String, List<String>> ageGroupModalitySegmentMap;
 		if(biometricModalitySegmentsMapforAgeGroup.containsKey(ageGroup)){
 			ageGroupModalitySegmentMap = biometricModalitySegmentsMapforAgeGroup.get(ageGroup);
-			}
+		}
 		else {
 			ageGroupModalitySegmentMap = biometricModalitySegmentsMapforAgeGroup.get("DEFAULT");
 		}
-		// Fetch metaInfo once — reused by both validateBiometricRecord and filterExceptionBiometrics
-		Map<String, String> metaInfo = priorityBasedPacketManagerService.getMetaInfo(id, process, ProviderStageName.BIO_DEDUPE);
+		// metaInfo reused by both validateBiometricRecord and filterExceptionBiometrics
 		validateBiometricRecord(biometricRecord, modalities, ageGroupModalitySegmentMap, metaInfo, policyTypeAndSubTypeMap);
 
 		byte[] content = cbeffutil.createXML(filterExceptionBiometrics(biometricRecord, id, process, metaInfo).getSegments());

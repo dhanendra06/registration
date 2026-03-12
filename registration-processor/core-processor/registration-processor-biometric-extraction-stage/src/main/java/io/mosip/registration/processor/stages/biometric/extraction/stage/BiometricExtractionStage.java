@@ -93,6 +93,9 @@ public class BiometricExtractionStage extends MosipVerticleAPIManager{
 	/**partner policy ids */
 	@Value("${biometric.extraction.default.partner.policy.ids}")
 	private String partnerPolicyIdsJson;
+
+	/** Cached extractors — same for all packets since partnerPolicyIdsJson is static config */
+	private volatile ExtractorsDto cachedExtractorsDto = null;
 	
 	/** The registration status service. */
 	@Autowired
@@ -394,6 +397,10 @@ public class BiometricExtractionStage extends MosipVerticleAPIManager{
 	 * @throws RegistrationProcessorCheckedException 
 	 */
 	private ExtractorsDto getExtractors(String id) throws JSONException, ApisResourceAccessException, JsonParseException, JsonMappingException, JsonProcessingException, IOException, RegistrationProcessorCheckedException {
+		// Return cached result — partnerPolicyIdsJson is static config, response is identical for all packets
+		if (cachedExtractorsDto != null) {
+			return cachedExtractorsDto;
+		}
 		JSONArray jArray=new JSONArray(partnerPolicyIdsJson);
 		ExtractorsDto extractorsDto=new ExtractorsDto();
 		 List<ErrorDTO> errors = new ArrayList<>();
@@ -402,14 +409,15 @@ public class BiometricExtractionStage extends MosipVerticleAPIManager{
 			pathsegments.add(jArray.getJSONObject(i).getString("partnerId"));
 			pathsegments.add("bioextractors");
 			pathsegments.add(jArray.getJSONObject(i).getString("policyId"));
-			
+
 			ResponseWrapper<?> responseWrapper=(ResponseWrapper<?>) registrationProcessorRestClientService.
 					getApi(ApiName.PARTNERGETBIOEXTRACTOR, pathsegments, "", "", ResponseWrapper.class);
 			if(responseWrapper.getResponse() !=null) {
 				extractorsDto=mapper.readValue(mapper.writeValueAsString(responseWrapper.getResponse()),
 					ExtractorsDto.class);
 				if(extractorsDto.getExtractors()!=null &&!extractorsDto.getExtractors().isEmpty()) {
-					return extractorsDto;
+					cachedExtractorsDto = extractorsDto;
+					return cachedExtractorsDto;
 				}
 				break;
 			}
@@ -417,7 +425,7 @@ public class BiometricExtractionStage extends MosipVerticleAPIManager{
 	            regProcLogger.error("Error occured while getting  biometric extractors.", responseWrapper.getErrors().iterator().next().toString());
 	            errors.addAll(responseWrapper.getErrors());
 	        }
-			
+
 		}
 		if(errors!=null && !errors.isEmpty()) {
 			throw new RegistrationProcessorCheckedException(errors.iterator().next().getErrorCode(),
