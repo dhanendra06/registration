@@ -78,12 +78,13 @@ public class ABISHandlerUtil {
 	 *                                               has occurred.
 	 * @throws                                       io.mosip.kernel.core.exception.IOException
 	 */
+	/**
+	 * Gets unique reg ids using an already-known latestTransactionId, avoiding a redundant DB query.
+	 */
 	public Set<String> getUniqueRegIds(String registrationId, String registrationType,
-										int iteration, String workflowInstanceId, ProviderStageName stageName) throws ApisResourceAccessException, JsonProcessingException, PacketManagerException, IOException {
+										String latestTransactionId, String workflowInstanceId, ProviderStageName stageName) throws ApisResourceAccessException, JsonProcessingException, PacketManagerException, IOException {
 		regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.USERID.toString(),
 				registrationId, "ABISHandlerUtil::getUniqueRegIds()::entry");
-		
-		String latestTransactionId = utilities.getLatestTransactionId(registrationId, registrationType, iteration, workflowInstanceId);
 
 		List<String> regBioRefIds = packetInfoDao.getAbisRefIdByWorkflowInstanceId(workflowInstanceId);
 
@@ -136,6 +137,16 @@ public class ABISHandlerUtil {
 	}
 
 	/**
+	 * Backward-compatible overload — derives latestTransactionId from DB and delegates.
+	 * Prefer the overload that accepts latestTransactionId directly to avoid the extra DB query.
+	 */
+	public Set<String> getUniqueRegIds(String registrationId, String registrationType,
+										int iteration, String workflowInstanceId, ProviderStageName stageName) throws ApisResourceAccessException, JsonProcessingException, PacketManagerException, IOException {
+		String latestTransactionId = utilities.getLatestTransactionId(registrationId, registrationType, iteration, workflowInstanceId);
+		return getUniqueRegIds(registrationId, registrationType, latestTransactionId, workflowInstanceId, stageName);
+	}
+
+	/**
 	 * Gets the packet status.
 	 *
 	 * @param registrationStatusDto
@@ -144,8 +155,9 @@ public class ABISHandlerUtil {
 	 */
 	public String getPacketStatus(InternalRegistrationStatusDto registrationStatusDto) {
 		// get all identify requests for latest transaction id
+		// Use latestRegistrationTransactionId from the already-fetched DTO instead of re-querying DB
 		List<AbisRequestDto> identifyRequests = getAllIdentifyRequest(registrationStatusDto.getRegistrationId(),
-				registrationStatusDto.getRegistrationType(), registrationStatusDto.getIteration(), registrationStatusDto.getWorkflowInstanceId());
+				registrationStatusDto.getLatestRegistrationTransactionId(), registrationStatusDto.getWorkflowInstanceId());
 
 		// if there are no identify requests present
 		if (CollectionUtils.isEmpty(identifyRequests))
@@ -165,9 +177,7 @@ public class ABISHandlerUtil {
 	 *            the registration id
 	 * @return the matched reg ids
 	 */
-	private List<AbisRequestDto> getAllIdentifyRequest(String registrationId, String process, int iteration, String workflowInstanceId) {
-		String latestTransactionId = utilities.getLatestTransactionId(registrationId, process, iteration, workflowInstanceId);
-
+	private List<AbisRequestDto> getAllIdentifyRequest(String registrationId, String latestTransactionId, String workflowInstanceId) {
 		List<String> regBioRefIds = packetInfoDao.getAbisRefIdByWorkflowInstanceId(workflowInstanceId);
 
 		if (!regBioRefIds.isEmpty()) {
@@ -214,13 +224,16 @@ public class ABISHandlerUtil {
 		Map<String, String> filteredRegMap = new LinkedHashMap<>();
 		Set<String> filteredRIds = new HashSet<>();
 
+		// For UPDATE: fetch packetUin once outside the loop — same value for every iteration
+		String packetUin = registrationType.equalsIgnoreCase(SyncTypeDto.UPDATE.toString())
+				? utility.getUIn(registrationId, registrationType, stageName) : null;
+
 		for (String machedRegId : matchedRegistrationIds) {
 
 			String matchedUin = idRepoService.getUinByRid(machedRegId,
 					utilities.getGetRegProcessorDemographicIdentity());
 
 			if (registrationType.equalsIgnoreCase(SyncTypeDto.UPDATE.toString())) {
-				String packetUin = utility.getUIn(registrationId, registrationType, stageName);
 				if (matchedUin != null && !packetUin.equals(matchedUin)) {
 					filteredRegMap.put(matchedUin, machedRegId);
 				}

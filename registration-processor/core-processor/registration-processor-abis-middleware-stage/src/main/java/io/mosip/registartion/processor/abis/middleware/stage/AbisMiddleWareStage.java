@@ -228,8 +228,8 @@ public class AbisMiddleWareStage extends MosipVerticleAPIManager {
 			List<String> abisRefList = packetInfoManager.getReferenceIdByWorkflowInstanceId(object.getWorkflowInstanceId());
 			validateNullCheck(abisRefList, "ABIS_REFERENCE_ID_NOT_FOUND");
 
-			String refRegtrnId = getLatestTransactionId(registrationId,
-					object.getReg_type(), object.getIteration(), object.getWorkflowInstanceId());
+			// Use latestRegistrationTransactionId from already-fetched DTO — avoids redundant DB query
+			String refRegtrnId = internalRegDto.getLatestRegistrationTransactionId();
 			validateNullCheck(refRegtrnId, "LATEST_TRANSACTION_ID_NOT_FOUND");
 			String abisRefId = abisRefList.get(0);
 			List<AbisRequestDto> abisInsertIdentifyList = packetInfoManager.getInsertOrIdentifyRequest(abisRefId,
