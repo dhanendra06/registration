@@ -6,6 +6,10 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 import jakarta.jms.Message;
@@ -785,8 +789,39 @@ public class AbisMiddleWareStage extends MosipVerticleAPIManager {
 	}
 
 	private void saveCandiateDtos(CandidatesDto[] candidatesDtos, AbisResponseDto abisResponseDto, String bioRefId) {
-		for (CandidatesDto candidatesDto : candidatesDtos) {
-			updateAbisResponseDetail(candidatesDto, abisResponseDto, bioRefId);
+		// Look up regIds in parallel, then batch-save all response detail entities at once
+		ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+		List<CompletableFuture<AbisResponseDetEntity>> futures = new ArrayList<>();
+		try {
+			for (CandidatesDto candidatesDto : candidatesDtos) {
+				if (candidatesDto.getReferenceId().equalsIgnoreCase(bioRefId)) continue;
+				futures.add(CompletableFuture.supplyAsync(() -> {
+					String candidateRegId = packetInfoDao.getRegIdByBioRefId(candidatesDto.getReferenceId().toLowerCase());
+					if (candidateRegId == null || candidateRegId.isEmpty()) return null;
+					AbisResponseDetEntity entity = new AbisResponseDetEntity();
+					AbisResponseDetPKEntity pk = new AbisResponseDetPKEntity();
+					pk.setAbisRespId(abisResponseDto.getId());
+					pk.setMatchedBioRefId(candidatesDto.getReferenceId().toLowerCase());
+					entity.setId(pk);
+					entity.setCrBy(SYSTEM);
+					entity.setUpdBy(SYSTEM);
+					entity.setIsDeleted(false);
+					entity.setCrDtimes(LocalDateTime.now(ZoneId.of("UTC")));
+					entity.setUpdDtimes(LocalDateTime.now(ZoneId.of("UTC")));
+					return entity;
+				}, executor));
+			}
+			CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+		} finally {
+			executor.close();
+		}
+		List<AbisResponseDetEntity> entities = new ArrayList<>();
+		for (CompletableFuture<AbisResponseDetEntity> f : futures) {
+			AbisResponseDetEntity entity = f.getNow(null);
+			if (entity != null) entities.add(entity);
+		}
+		if (!entities.isEmpty()) {
+			abisResponseDetailRepositary.saveAll(entities);
 		}
 	}
 
