@@ -8,6 +8,10 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import io.mosip.kernel.core.util.DateUtils2;
 import io.mosip.registration.processor.core.util.JsonUtil;
@@ -256,33 +260,107 @@ public class WorkflowInternalActionVerticle extends MosipVerticleAPIManager {
 	private void processAnonymousProfile(WorkflowInternalActionDTO workflowInternalActionDTO)
 			throws IOException, JSONException, BaseCheckedException {
 
-		String json = null;
 		String registrationId = workflowInternalActionDTO.getRid();
 		String registrationType = workflowInternalActionDTO.getReg_type();
 
 		regProcLogger.info("processAnonymousProfile called for registration id {}", registrationId);
 
-		InternalRegistrationStatusDto registrationStatusDto = registrationStatusService.getRegistrationStatus(
-				registrationId, registrationType, workflowInternalActionDTO.getIteration(),
-				workflowInternalActionDTO.getWorkflowInstanceId());
+		// Resolve schema version field name (cheap local operation, no I/O)
 		JSONObject regProcessorIdentityJson = utility.getRegistrationProcessorMappingJson(MappingJsonConstants.IDENTITY);
-		String idSchemaVersionValue = JsonUtil.getJSONValue(JsonUtil.getJSONObject(regProcessorIdentityJson, MappingJsonConstants.IDSCHEMA_VERSION), MappingJsonConstants.VALUE);
-		String schemaVersion = priorityBasedpacketManagerService.getFieldByMappingJsonKey(registrationId,
-				idSchemaVersionValue, registrationType, ProviderStageName.WORKFLOW_MANAGER);
-		Map<String,String> fieldTypeMap = idSchemaUtil.getIdSchemaFieldTypes(
-				Double.parseDouble(schemaVersion));
-		Map<String, String> fieldMap = priorityBasedpacketManagerService.getFields(registrationId,
-				idSchemaUtil.getDefaultFields(Double.valueOf(schemaVersion)), registrationType,
-				ProviderStageName.WORKFLOW_MANAGER);
-		Map<String, String> metaInfoMap = priorityBasedpacketManagerService.getMetaInfo(registrationId,
-				registrationType,
-				ProviderStageName.WORKFLOW_MANAGER);
-		BiometricRecord biometricRecord = priorityBasedpacketManagerService.getBiometrics(registrationId,
-				MappingJsonConstants.INDIVIDUAL_BIOMETRICS, registrationType, ProviderStageName.WORKFLOW_MANAGER);
-		json = anonymousProfileService.buildJsonStringFromPacketInfo(biometricRecord, fieldMap, fieldTypeMap,
-				metaInfoMap, registrationStatusDto.getStatusCode(), registrationStatusDto.getRegistrationStageName());
-		anonymousProfileService.saveAnonymousProfile(registrationId, registrationStatusDto.getRegistrationStageName(), json);
-		
+		String idSchemaVersionValue = JsonUtil.getJSONValue(
+				JsonUtil.getJSONObject(regProcessorIdentityJson, MappingJsonConstants.IDSCHEMA_VERSION),
+				MappingJsonConstants.VALUE);
+
+		// --- Parallel execution via virtual threads (Java 21 stable API) ---
+		// Track 1: registration status (independent DB call)
+		// Track 2: getFieldByMappingJsonKey → getIdSchemaFieldTypes + getFields (chained HTTP)
+		// Track 3: getMetaInfo (independent HTTP)
+		// Track 4: getBiometrics (independent HTTP)
+		ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+
+		CompletableFuture<InternalRegistrationStatusDto> statusFuture;
+		CompletableFuture<Map<String, String>> metaInfoFuture;
+		CompletableFuture<BiometricRecord> biometricsFuture;
+		CompletableFuture<Map<String, String>> fieldTypeMapFuture;
+		CompletableFuture<Map<String, String>> fieldMapFuture;
+
+		try {
+			// Track 1
+			statusFuture = CompletableFuture.supplyAsync(
+					() -> registrationStatusService.getRegistrationStatus(
+							registrationId, registrationType,
+							workflowInternalActionDTO.getIteration(),
+							workflowInternalActionDTO.getWorkflowInstanceId()),
+					executor);
+
+			// Track 3
+			metaInfoFuture = CompletableFuture.supplyAsync(() -> {
+				try {
+					return priorityBasedpacketManagerService.getMetaInfo(
+							registrationId, registrationType, ProviderStageName.WORKFLOW_MANAGER);
+				} catch (Exception e) { throw new CompletionException(e); }
+			}, executor);
+
+			// Track 4
+			biometricsFuture = CompletableFuture.supplyAsync(() -> {
+				try {
+					return priorityBasedpacketManagerService.getBiometrics(
+							registrationId, MappingJsonConstants.INDIVIDUAL_BIOMETRICS,
+							registrationType, ProviderStageName.WORKFLOW_MANAGER);
+				} catch (Exception e) { throw new CompletionException(e); }
+			}, executor);
+
+			// Track 2: schema version first, then fan out into fieldTypeMap + fieldMap
+			CompletableFuture<String> schemaVersionFuture = CompletableFuture.supplyAsync(() -> {
+				try {
+					return priorityBasedpacketManagerService.getFieldByMappingJsonKey(
+							registrationId, idSchemaVersionValue,
+							registrationType, ProviderStageName.WORKFLOW_MANAGER);
+				} catch (Exception e) { throw new CompletionException(e); }
+			}, executor);
+
+			// fieldTypeMap is fast (local schema lookup), chain without extra thread
+			fieldTypeMapFuture = schemaVersionFuture.thenApply(sv -> {
+				try {
+					return idSchemaUtil.getIdSchemaFieldTypes(Double.parseDouble(sv));
+				} catch (Exception e) { throw new CompletionException(e); }
+			});
+
+			// fieldMap is another HTTP call, run on a new virtual thread
+			fieldMapFuture = schemaVersionFuture.thenApplyAsync(sv -> {
+				try {
+					return priorityBasedpacketManagerService.getFields(
+							registrationId, idSchemaUtil.getDefaultFields(Double.valueOf(sv)),
+							registrationType, ProviderStageName.WORKFLOW_MANAGER);
+				} catch (Exception e) { throw new CompletionException(e); }
+			}, executor);
+
+			CompletableFuture.allOf(statusFuture, metaInfoFuture, biometricsFuture,
+					fieldTypeMapFuture, fieldMapFuture).join();
+		} finally {
+			executor.close();
+		}
+
+		try {
+			InternalRegistrationStatusDto registrationStatusDto = statusFuture.join();
+			Map<String, String> metaInfoMap = metaInfoFuture.join();
+			BiometricRecord biometricRecord = biometricsFuture.join();
+			Map<String, String> fieldTypeMap = fieldTypeMapFuture.join();
+			Map<String, String> fieldMap = fieldMapFuture.join();
+
+			String json = anonymousProfileService.buildJsonStringFromPacketInfo(
+					biometricRecord, fieldMap, fieldTypeMap, metaInfoMap,
+					registrationStatusDto.getStatusCode(),
+					registrationStatusDto.getRegistrationStageName());
+			anonymousProfileService.saveAnonymousProfile(
+					registrationId, registrationStatusDto.getRegistrationStageName(), json);
+		} catch (CompletionException e) {
+			Throwable cause = e.getCause();
+			if (cause instanceof IOException) throw (IOException) cause;
+			if (cause instanceof BaseCheckedException) throw (BaseCheckedException) cause;
+			throw new IOException("Parallel execution failed for registration id: " + registrationId, cause);
+		}
+
 		this.send(this.mosipEventBus, new MessageBusAddress(anonymousProfileBusAddress), workflowInternalActionDTO);
 
 		regProcLogger.info("processAnonymousProfile ended for registration id {}", registrationId);
