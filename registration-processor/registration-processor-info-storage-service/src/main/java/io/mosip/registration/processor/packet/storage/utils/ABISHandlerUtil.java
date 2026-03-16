@@ -7,6 +7,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 import io.mosip.kernel.core.util.exception.JsonProcessingException;
@@ -295,26 +299,34 @@ public class ABISHandlerUtil {
 		Map<String, String> filteredRegMap = new LinkedHashMap<>();
 		Set<String> filteredRIds = new HashSet<>();
 
-		for (String machedRegId : matchedRegistrationIds) {
+		if (matchedRegistrationIds == null || matchedRegistrationIds.isEmpty()) {
+			return filteredRIds;
+		}
 
+		// Hoist packetUin fetch out of loop — same registrationId every iteration
+		String packetUin = null;
+		if (registrationType.equalsIgnoreCase(SyncTypeDto.UPDATE.toString())) {
+			packetUin = utility.getUIn(registrationId, registrationType, stageName);
+		}
+		final String finalPacketUin = packetUin;
+
+		for (String machedRegId : matchedRegistrationIds) {
 			String matchedUin = idRepoService.getUinByRid(machedRegId,
 					utilities.getGetRegProcessorDemographicIdentity());
 
 			if (registrationType.equalsIgnoreCase(SyncTypeDto.UPDATE.toString())) {
-				String packetUin = utility.getUIn(registrationId, registrationType, stageName);
-				if (matchedUin != null && !packetUin.equals(matchedUin)) {
+				if (matchedUin != null && !finalPacketUin.equals(matchedUin)) {
 					filteredRegMap.put(matchedUin, machedRegId);
 				}
 			}
 			if (registrationType.equalsIgnoreCase(SyncTypeDto.NEW.toString()) && matchedUin != null) {
 				filteredRegMap.put(matchedUin, machedRegId);
 			}
-
 			if (registrationType.equalsIgnoreCase(SyncTypeDto.LOST.toString()) && matchedUin != null) {
 				filteredRegMap.put(matchedUin, machedRegId);
 			}
-
 		}
+
 		if (!filteredRegMap.isEmpty()) {
 			filteredRIds = new HashSet<String>(filteredRegMap.values());
 		}
@@ -343,19 +355,51 @@ public class ABISHandlerUtil {
 		Map<String, String> filteredRegMap = new LinkedHashMap<>();
 		Set<String> filteredRIds = new HashSet<>();
 		ProcessedMatchedResult processedMatchedResult = new ProcessedMatchedResult();
-		for (String machedRegId : matchedRegistrationIds) {
 
-			String matchedUin = idRepoService.getUinByRid(machedRegId,
-					utilities.getGetRegProcessorDemographicIdentity());
+		if (matchedRegistrationIds == null || matchedRegistrationIds.isEmpty()) {
+			processedMatchedResult.setMatchedResults(filteredRIds);
+			return processedMatchedResult;
+		}
+
+		// Hoist packetUin fetch out of the loop — registrationId is constant,
+		// so calling getUIn() inside the loop was making N identical HTTP calls.
+		String packetUin = null;
+		if (registrationType.equalsIgnoreCase(SyncTypeDto.UPDATE.toString())) {
+			packetUin = utility.getUIn(registrationId, registrationType, stageName);
+		}
+
+		// Parallelize getUinByRid() — all matched IDs are independent
+		ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+		List<CompletableFuture<String>> uinFutures = new ArrayList<>();
+		try {
+			for (String matchedRegId : matchedRegistrationIds) {
+				uinFutures.add(CompletableFuture.supplyAsync(() -> {
+					try {
+						return idRepoService.getUinByRid(matchedRegId,
+								utilities.getGetRegProcessorDemographicIdentity());
+					} catch (Exception e) { throw new CompletionException(e); }
+				}, executor));
+			}
+			CompletableFuture.allOf(uinFutures.toArray(new CompletableFuture[0])).join();
+		} catch (CompletionException e) {
+			Throwable cause = e.getCause();
+			if (cause instanceof ApisResourceAccessException) throw (ApisResourceAccessException) cause;
+			if (cause instanceof IOException) throw (IOException) cause;
+			throw new IOException("Parallel getUinByRid failed for registrationId: " + registrationId, cause);
+		} finally {
+			executor.close();
+		}
+
+		final String finalPacketUin = packetUin;
+		for (int i = 0; i < matchedRegistrationIds.size(); i++) {
+			String machedRegId = matchedRegistrationIds.get(i);
+			String matchedUin = uinFutures.get(i).join();
 
 			if (registrationType.equalsIgnoreCase(SyncTypeDto.UPDATE.toString())) {
-				String packetUin = utility.getUIn(registrationId, registrationType, stageName);
 				if (matchedUin != null) {
-					if (packetUin.equals(matchedUin)) {
-						// Explicitly capture that UIN matched
+					if (finalPacketUin.equals(matchedUin)) {
 						processedMatchedResult.setBiometricMatchedForPacketUIN(true);
 					} else {
-						// Different UIN found
 						filteredRegMap.put(matchedUin, machedRegId);
 					}
 				}
@@ -363,18 +407,16 @@ public class ABISHandlerUtil {
 			if (registrationType.equalsIgnoreCase(SyncTypeDto.NEW.toString()) && matchedUin != null) {
 				filteredRegMap.put(matchedUin, machedRegId);
 			}
-
 			if (registrationType.equalsIgnoreCase(SyncTypeDto.LOST.toString()) && matchedUin != null) {
 				filteredRegMap.put(matchedUin, machedRegId);
 			}
-
 		}
+
 		if (!filteredRegMap.isEmpty()) {
 			filteredRIds = new HashSet<String>(filteredRegMap.values());
 		}
 
 		processedMatchedResult.setMatchedResults(filteredRIds);
-
 		return processedMatchedResult;
 
 	}

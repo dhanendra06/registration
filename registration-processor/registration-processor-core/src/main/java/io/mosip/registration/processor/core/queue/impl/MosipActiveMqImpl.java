@@ -108,16 +108,16 @@ public class MosipActiveMqImpl implements MosipQueueManager<MosipQueue, byte[]> 
      * lang.Object, java.lang.Object, java.lang.String, long)
      */
     @Override
-	@SuppressWarnings({ "java:S2095" })
     public Boolean send(MosipQueue mosipQueue, byte[] message, String address, int messageTTL) {
         regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.USERID.toString(),
                 "", "MosipActiveMqImpl::send()::entry");
 
         boolean flag = false;
         initialSetup(mosipQueue);
+        MessageProducer messageProducer = null;
         try {
             destination = session.createQueue(address);
-            MessageProducer messageProducer = session.createProducer(destination);
+            messageProducer = session.createProducer(destination);
             BytesMessage byteMessage = session.createBytesMessage();
             byteMessage.writeObject(message);
             if(messageTTL > 0)
@@ -132,6 +132,10 @@ public class MosipActiveMqImpl implements MosipQueueManager<MosipQueue, byte[]> 
                             + PlatformErrorMessages.RPR_MQI_UNABLE_TO_SEND_TO_QUEUE.getMessage());
             throw new ConnectionUnavailableException(
                     PlatformErrorMessages.RPR_MQI_UNABLE_TO_SEND_TO_QUEUE.getMessage());
+        } finally {
+            if (messageProducer != null) {
+                try { messageProducer.close(); } catch (JMSException ignored) {}
+            }
         }
         regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.USERID.toString(),
                 "", "MosipActiveMqImpl::send()::exit");
@@ -145,16 +149,16 @@ public class MosipActiveMqImpl implements MosipQueueManager<MosipQueue, byte[]> 
     }
 
     @Override
-	@SuppressWarnings({ "java:S2095" })
     public Boolean send(MosipQueue mosipQueue, String message, String address, int messageTTL) {
         boolean flag = false;
         initialSetup(mosipQueue);
+        // fix for activemq connection issue
+        if (session == null)
+            initialSetup(mosipQueue);
+        MessageProducer messageProducer = null;
         try {
-            // fix for activemq connection issue
-            if (session == null)
-                initialSetup(mosipQueue);
             destination = session.createQueue(address);
-            MessageProducer messageProducer = session.createProducer(destination);
+            messageProducer = session.createProducer(destination);
             TextMessage textMessage = session.createTextMessage();
             textMessage.setText(message);
             if(messageTTL > 0)
@@ -169,6 +173,10 @@ public class MosipActiveMqImpl implements MosipQueueManager<MosipQueue, byte[]> 
                             + PlatformErrorMessages.RPR_MQI_UNABLE_TO_SEND_TO_QUEUE.getMessage());
             throw new ConnectionUnavailableException(
                     PlatformErrorMessages.RPR_MQI_UNABLE_TO_SEND_TO_QUEUE.getMessage());
+        } finally {
+            if (messageProducer != null) {
+                try { messageProducer.close(); } catch (JMSException ignored) {}
+            }
         }
         regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.USERID.toString(),
                 "", "MosipActiveMqImpl::send()::exit");
