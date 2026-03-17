@@ -158,10 +158,14 @@ public class ABISHandlerUtil {
 	 */
 	public ProcessedMatchedResult getProcessedMatchedResult(String registrationId, String registrationType,
 															 int iteration, String workflowInstanceId, ProviderStageName stageName) throws ApisResourceAccessException, JsonProcessingException, PacketManagerException, IOException {
+		String latestTransactionId = utilities.getLatestTransactionId(registrationId, registrationType, iteration, workflowInstanceId);
+		return getProcessedMatchedResult(registrationId, registrationType, workflowInstanceId, stageName, latestTransactionId);
+	}
+
+	public ProcessedMatchedResult getProcessedMatchedResult(String registrationId, String registrationType,
+															 String workflowInstanceId, ProviderStageName stageName, String latestTransactionId) throws ApisResourceAccessException, JsonProcessingException, PacketManagerException, IOException {
 		regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.USERID.toString(),
 				registrationId, "ABISHandlerUtil::getProcessedMatchedResult()::entry");
-
-		String latestTransactionId = utilities.getLatestTransactionId(registrationId, registrationType, iteration, workflowInstanceId);
 
 		List<String> regBioRefIds = packetInfoDao.getAbisRefIdByWorkflowInstanceId(workflowInstanceId);
 
@@ -224,9 +228,10 @@ public class ABISHandlerUtil {
 	 * @return the packet status
 	 */
 	public String getPacketStatus(InternalRegistrationStatusDto registrationStatusDto) {
-		// get all identify requests for latest transaction id
-		List<AbisRequestDto> identifyRequests = getAllIdentifyRequest(registrationStatusDto.getRegistrationId(),
-				registrationStatusDto.getRegistrationType(), registrationStatusDto.getIteration(), registrationStatusDto.getWorkflowInstanceId());
+		// get all identify requests for latest transaction id — use already-fetched transactionId from DTO
+		List<AbisRequestDto> identifyRequests = getAllIdentifyRequest(
+				registrationStatusDto.getLatestRegistrationTransactionId(),
+				registrationStatusDto.getWorkflowInstanceId());
 
 		// if there are no identify requests present
 		if (CollectionUtils.isEmpty(identifyRequests))
@@ -246,9 +251,7 @@ public class ABISHandlerUtil {
 	 *            the registration id
 	 * @return the matched reg ids
 	 */
-	private List<AbisRequestDto> getAllIdentifyRequest(String registrationId, String process, int iteration, String workflowInstanceId) {
-		String latestTransactionId = utilities.getLatestTransactionId(registrationId, process, iteration, workflowInstanceId);
-
+	private List<AbisRequestDto> getAllIdentifyRequest(String latestTransactionId, String workflowInstanceId) {
 		List<String> regBioRefIds = packetInfoDao.getAbisRefIdByWorkflowInstanceId(workflowInstanceId);
 
 		if (!regBioRefIds.isEmpty()) {

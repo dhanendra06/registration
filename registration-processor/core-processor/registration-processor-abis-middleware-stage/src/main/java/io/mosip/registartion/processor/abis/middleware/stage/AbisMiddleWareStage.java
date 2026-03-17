@@ -6,8 +6,11 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import jakarta.jms.Message;
@@ -144,6 +147,8 @@ public class AbisMiddleWareStage extends MosipVerticleAPIManager {
 	MosipEventBus mosipEventBus = null;
 
 	private ExecutorService consumerExecutor;
+	private final ConcurrentHashMap<String, Boolean> processedBatches = new ConcurrentHashMap<>();
+	private ScheduledExecutorService batchCleanupScheduler;
 
 	/** Mosip router for APIs */
 	@Autowired
@@ -164,6 +169,7 @@ public class AbisMiddleWareStage extends MosipVerticleAPIManager {
 	public void deployVerticle() {
 		try {
 			consumerExecutor = Executors.newVirtualThreadPerTaskExecutor();
+			batchCleanupScheduler = Executors.newSingleThreadScheduledExecutor();
 			mosipEventBus = this.getEventBus(this, clusterManagerUrl, getWorkerPoolSize());
 			this.consume(mosipEventBus, MessageBusAddress.ABIS_MIDDLEWARE_BUS_IN, messageExpiryTimeLimit);
 			abisQueueDetails = utility.getAbisQueueDetails();
@@ -479,7 +485,8 @@ public class AbisMiddleWareStage extends MosipVerticleAPIManager {
 				}
 				updteAbisRequestProcessed(abisIdentifyResponseDto, abisCommonRequestDto);
 
-				if (checkAllIdentifyRequestsProcessed(batchId)) {
+				if (checkAllIdentifyRequestsProcessed(batchId)
+							&& processedBatches.putIfAbsent(batchId, Boolean.TRUE) == null) {
 
 					regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.USERID.toString(),
 							"",
@@ -487,6 +494,7 @@ public class AbisMiddleWareStage extends MosipVerticleAPIManager {
 
 					sendToAbisHandler(eventBus, bioRefId, registrationId, internalRegStatusDto.getRegistrationType(),
 							internalRegStatusDto.getIteration(), internalRegStatusDto.getWorkflowInstanceId());
+					batchCleanupScheduler.schedule(() -> processedBatches.remove(batchId), 5, TimeUnit.MINUTES);
 
 					}
 				} else {

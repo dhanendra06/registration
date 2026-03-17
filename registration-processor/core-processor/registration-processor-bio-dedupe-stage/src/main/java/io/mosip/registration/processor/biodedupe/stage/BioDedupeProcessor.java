@@ -223,7 +223,8 @@ public class BioDedupeProcessor {
 				} else if (packetStatus.equalsIgnoreCase(AbisConstant.POST_ABIS_IDENTIFICATION)) {
 					ProcessedMatchedResult processedMatchedResult = abisHandlerUtil
 							.getProcessedMatchedResult(registrationStatusDto.getRegistrationId(),
-									registrationType, object.getIteration(), object.getWorkflowInstanceId(), ProviderStageName.BIO_DEDUPE);
+									registrationType, object.getWorkflowInstanceId(), ProviderStageName.BIO_DEDUPE,
+									registrationStatusDto.getLatestRegistrationTransactionId());
 					Set<String> matchedRegIds = processedMatchedResult.getMatchedResults();
 					lostPacketPostAbisIdentification(registrationStatusDto, object, matchedRegIds);
 				}
@@ -453,7 +454,8 @@ public class BioDedupeProcessor {
 		String moduleId = "";
 		String moduleName = ModuleName.BIO_DEDUPE.toString();
 		ProcessedMatchedResult processedMatchedResult = abisHandlerUtil.getProcessedMatchedResult(registrationStatusDto.getRegistrationId(),
-				registrationType, registrationStatusDto.getIteration(), registrationStatusDto.getWorkflowInstanceId(), ProviderStageName.BIO_DEDUPE);
+				registrationType, registrationStatusDto.getWorkflowInstanceId(), ProviderStageName.BIO_DEDUPE,
+				registrationStatusDto.getLatestRegistrationTransactionId());
 
 		Set<String> matchedRegIds = new HashSet<>(
 				Optional.ofNullable(processedMatchedResult.getMatchedResults()).orElse(Collections.emptySet())

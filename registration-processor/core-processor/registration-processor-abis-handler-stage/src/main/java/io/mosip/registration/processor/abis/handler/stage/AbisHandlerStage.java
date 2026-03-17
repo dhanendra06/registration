@@ -9,6 +9,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 import io.mosip.kernel.core.util.DateUtils2;
@@ -587,23 +591,50 @@ public class AbisHandlerStage extends MosipVerticleAPIManager {
 		String individualBiometricsLabel = JsonUtil.getJSONValue(
 				JsonUtil.getJSONObject(regProcessorIdentityJson, MappingJsonConstants.INDIVIDUAL_BIOMETRICS),
 				MappingJsonConstants.VALUE);
-		BiometricRecord biometricRecord = priorityBasedPacketManagerService.getBiometrics(id, individualBiometricsLabel,
-				policyTypeAndSubTypeList, process, ProviderStageName.BIO_DEDUPE);
+		// Fetch biometrics, tags and metaInfo in parallel -- all three are independent
+		ExecutorService fetchExecutor = Executors.newVirtualThreadPerTaskExecutor();
+		CompletableFuture<BiometricRecord> bioFuture;
+		CompletableFuture<Map<String, String>> tagsFuture;
+		CompletableFuture<Map<String, String>> metaInfoFuture;
+		try {
+			bioFuture = CompletableFuture.supplyAsync(() -> {
+				try {
+					return priorityBasedPacketManagerService.getBiometrics(id, individualBiometricsLabel,
+							policyTypeAndSubTypeList, process, ProviderStageName.BIO_DEDUPE);
+				} catch (Exception e) { throw new CompletionException(e); }
+			}, fetchExecutor);
+			tagsFuture = CompletableFuture.supplyAsync(() -> {
+				try {
+					return packetManagerService.getAllTags(id);
+				} catch (Exception e) { throw new CompletionException(e); }
+			}, fetchExecutor);
+			metaInfoFuture = CompletableFuture.supplyAsync(() -> {
+				try {
+					return priorityBasedPacketManagerService.getMetaInfo(id, process, ProviderStageName.BIO_DEDUPE);
+				} catch (Exception e) { throw new CompletionException(e); }
+			}, fetchExecutor);
+			CompletableFuture.allOf(bioFuture, tagsFuture, metaInfoFuture).join();
+		} catch (CompletionException e) {
+			Throwable cause = e.getCause() != null ? e.getCause() : e;
+			if (cause instanceof Exception) throw (Exception) cause;
+			throw new RuntimeException(cause);
+		} finally {
+			fetchExecutor.close();
+		}
+		BiometricRecord biometricRecord = bioFuture.join();
+		Map<String, String> tags = tagsFuture.join();
+		Map<String, String> metaInfo = metaInfoFuture.join();
 
-		Map<String, String> tags = packetManagerService.getAllTags(id);
 		String ageGroup = tags.get("AGE_GROUP");
 		Map<String, List<String>> ageGroupModalitySegmentMap;
-		if(biometricModalitySegmentsMapforAgeGroup.containsKey(ageGroup)){
+		if (biometricModalitySegmentsMapforAgeGroup.containsKey(ageGroup)) {
 			ageGroupModalitySegmentMap = biometricModalitySegmentsMapforAgeGroup.get(ageGroup);
-			}
-		else {
+		} else {
 			ageGroupModalitySegmentMap = biometricModalitySegmentsMapforAgeGroup.get("DEFAULT");
 		}
-		validateBiometricRecord(biometricRecord, modalities, ageGroupModalitySegmentMap,
-				priorityBasedPacketManagerService.getMetaInfo(id, process, ProviderStageName.BIO_DEDUPE),
-				policyTypeAndSubTypeMap);
+		validateBiometricRecord(biometricRecord, modalities, ageGroupModalitySegmentMap, metaInfo, policyTypeAndSubTypeMap);
 
-		byte[] content = cbeffutil.createXML(filterExceptionBiometrics(biometricRecord,id,process).getSegments());
+		byte[] content = cbeffutil.createXML(filterExceptionBiometrics(biometricRecord, metaInfo).getSegments());
 
 		MultiValueMap<String, Object> map = new LinkedMultiValueMap<>();
 		map.add("name", individualBiometricsLabel);
@@ -714,12 +745,10 @@ public class AbisHandlerStage extends MosipVerticleAPIManager {
 		}
 	}
 
-	private BiometricRecord filterExceptionBiometrics(BiometricRecord biometricRecord, String id, String process)
-			throws ApisResourceAccessException, PacketManagerException, JsonProcessingException, IOException,
-			JSONException
+	private BiometricRecord filterExceptionBiometrics(BiometricRecord biometricRecord, Map<String, String> metaInfo)
+			throws JsonProcessingException, IOException, JSONException
 	{
-
-		String version = getRegClientVersionFromMetaInfo(id, process, priorityBasedPacketManagerService.getMetaInfo(id, process, ProviderStageName.BIO_DEDUPE));
+		String version = getRegClientVersionFromMetaInfo(metaInfo);
 		if (regClientVersionsBeforeCbeffOthersAttritube.contains(version)) {
 			return biometricRecord;
 		}
@@ -734,8 +763,8 @@ public class AbisHandlerStage extends MosipVerticleAPIManager {
         return biorecord;
     }
 
-	private String getRegClientVersionFromMetaInfo(String id, String process, Map<String, String> metaInfoMap)
-			throws ApisResourceAccessException, PacketManagerException, IOException, JSONException {
+	private String getRegClientVersionFromMetaInfo(Map<String, String> metaInfoMap)
+			throws IOException, JSONException {
 		String metadata = metaInfoMap.get(JsonConstant.METADATA);
 		String version = null;
 		if (StringUtils.isNotEmpty(metadata)) {
