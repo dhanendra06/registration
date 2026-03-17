@@ -4,7 +4,6 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 
 import io.mosip.kernel.core.util.DateUtils2;
@@ -78,24 +77,17 @@ public class AuditLogRequestBuilder {
 	}
 
 	/**
-	 * Unwraps ExecutionException from CompletableFuture.get() and rethrows
-	 * the original cause — so sync catch blocks see the real exception type.
+	 * Fire-and-forget: submits the audit future and returns immediately.
+	 * Failures are logged but never block the caller.
 	 */
-	private ResponseWrapper<AuditResponseDto> getFromFuture(
-			CompletableFuture<ResponseWrapper<AuditResponseDto>> future)
-			throws ApisResourceAccessException, Exception {
-		try {
-			return future.orTimeout(5, java.util.concurrent.TimeUnit.SECONDS).get();
-		} catch (ExecutionException ee) {
-			Throwable cause = ee.getCause();
-			if (cause instanceof ApisResourceAccessException) {
-				throw (ApisResourceAccessException) cause;
-			}
-			throw new Exception(cause != null ? cause.getMessage() : ee.getMessage(), cause);
-		} catch (InterruptedException ie) {
-			Thread.currentThread().interrupt();
-			throw new Exception("Audit interrupted: " + ie.getMessage(), ie);
-		}
+	private ResponseWrapper<AuditResponseDto> fireAndForget(
+			CompletableFuture<ResponseWrapper<AuditResponseDto>> future) {
+		future.exceptionally(e -> {
+			Throwable cause = e.getCause() != null ? e.getCause() : e;
+			regProcLogger.error(cause.getMessage());
+			return new ResponseWrapper<>();
+		});
+		return new ResponseWrapper<>();
 	}
 
 	// =========================================================================
@@ -111,14 +103,8 @@ public class AuditLogRequestBuilder {
 						+ "			String registrationId, ApiName apiname)::entry");
 
 		ResponseWrapper<AuditResponseDto> responseWrapper = new ResponseWrapper<>();
-		try {
-			responseWrapper = getFromFuture(
-					createAuditRequestBuilderAsync(description, eventId, eventName, eventType, registrationId, apiname));
-		} catch (ApisResourceAccessException arae) {
-			regProcLogger.error(arae.getMessage()); // short format — test expects this
-		} catch (Exception e) {
-			regProcLogger.error("Error in createAuditRequestBuilder: " + e.getMessage());
-		}
+		responseWrapper = fireAndForget(
+				createAuditRequestBuilderAsync(description, eventId, eventName, eventType, registrationId, apiname));
 
 		regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
 				registrationId,
@@ -201,15 +187,9 @@ public class AuditLogRequestBuilder {
 						+ "			String registrationId)::entry");
 
 		ResponseWrapper<AuditResponseDto> responseWrapper = new ResponseWrapper<>();
-		try {
-			responseWrapper = getFromFuture(
-					createAuditRequestBuilderAsync(description, eventId, eventName, eventType,
-							moduleId, moduleName, registrationId, auditLogConstant));
-		} catch (ApisResourceAccessException arae) {
-			regProcLogger.error(arae.getMessage()); // short format — test expects this
-		} catch (Exception e) {
-			regProcLogger.error("Error in createAuditRequestBuilder: " + e.getMessage());
-		}
+		responseWrapper = fireAndForget(
+				createAuditRequestBuilderAsync(description, eventId, eventName, eventType,
+						moduleId, moduleName, registrationId, auditLogConstant));
 
 		regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
 				registrationId,
@@ -292,15 +272,9 @@ public class AuditLogRequestBuilder {
 						+ "			String registrationId)::entry");
 
 		ResponseWrapper<AuditResponseDto> responseWrapper = new ResponseWrapper<>();
-		try {
-			responseWrapper = getFromFuture(
-					createAuditRequestBuilderAsync(description, eventId, eventName, eventType,
-							moduleId, moduleName, registrationId, userId));
-		} catch (ApisResourceAccessException arae) {
-			regProcLogger.error(arae.getMessage()); // short format — test expects this
-		} catch (Exception e) {
-			regProcLogger.error("Error in createAuditRequestBuilder: " + e.getMessage());
-		}
+		responseWrapper = fireAndForget(
+				createAuditRequestBuilderAsync(description, eventId, eventName, eventType,
+						moduleId, moduleName, registrationId, userId));
 
 		regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
 				registrationId,

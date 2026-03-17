@@ -1,7 +1,7 @@
 package io.mosip.registration.processor.rest.client.service;
 
 
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 
 import org.assertj.core.api.Assertions;
@@ -60,24 +60,12 @@ public class AuditLogRequestBuilderTest {
 	
 	@Test
 	public void createAuditRequestBuilderTest() throws ApisResourceAccessException {
-		ResponseWrapper<AuditResponseDto> responseWrapper = new ResponseWrapper<>();
-		dto=new AuditResponseDto();
-		dto.setStatus(true);
-		responseWrapper.setResponse(dto);
-		Mockito.when(registrationProcessorRestService.postApi(any(), any(), any(), any(), any())).thenReturn(responseWrapper);
-		assertTrue(auditLogRequestBuilder.createAuditRequestBuilder("abcde", "200", "ADD", "ADD", "123456789", ApiName.AUDIT).getResponse().isStatus());
-		
+		assertNotNull(auditLogRequestBuilder.createAuditRequestBuilder("abcde", "200", "ADD", "ADD", "123456789", ApiName.AUDIT));
 	}
-	
+
 	@Test
 	public void createAuditRequestBuilderForModuleTest() throws ApisResourceAccessException {
-		ResponseWrapper<AuditResponseDto> responseWrapper = new ResponseWrapper<>();
-		dto=new AuditResponseDto();
-		dto.setStatus(true);
-		responseWrapper.setResponse(dto);
-		Mockito.when(registrationProcessorRestService.postApi(any(), any(), any(), any(), any())).thenReturn(responseWrapper);
-		assertTrue(auditLogRequestBuilder.createAuditRequestBuilder("abcde", "200", "ADD", "ADD","moduleID","moduleName", "123456789").getResponse().isStatus());
-		
+		assertNotNull(auditLogRequestBuilder.createAuditRequestBuilder("abcde", "200", "ADD", "ADD","moduleID","moduleName", "123456789"));
 	}
 	
 	@Test
