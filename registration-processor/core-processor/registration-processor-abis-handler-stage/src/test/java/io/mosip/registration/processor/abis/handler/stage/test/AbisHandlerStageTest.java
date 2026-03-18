@@ -14,6 +14,8 @@ import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import org.assertj.core.util.Lists;
 import org.junit.Before;
@@ -221,6 +223,8 @@ public class AbisHandlerStageTest {
 		ReflectionTestUtils.setField(abisHandlerStage, "exceptionSegmentsMap", getExceptionModalityMap());
 		ReflectionTestUtils.setField(abisHandlerStage, "regClientVersionsBeforeCbeffOthersAttritube",
 				Arrays.asList("1.1.3"));
+		ExecutorService testExecutor = Executors.newFixedThreadPool(5);
+		ReflectionTestUtils.setField(abisHandlerStage, "abisRequestExecutor", testExecutor);
 		Mockito.when(env.getProperty("DATASHARECREATEURL")).thenReturn("/v1/datashare/create");
 		AbisApplicationDto dto = new AbisApplicationDto();
 		dto.setCode("ABIS1");

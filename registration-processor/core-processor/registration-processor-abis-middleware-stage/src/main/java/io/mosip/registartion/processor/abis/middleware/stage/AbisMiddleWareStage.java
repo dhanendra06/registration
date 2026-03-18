@@ -20,6 +20,7 @@ import org.apache.activemq.command.ActiveMQBytesMessage;
 import org.assertj.core.util.Arrays;
 import org.json.simple.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.context.config.annotation.RefreshScope;
 import org.springframework.context.annotation.ComponentScan;
@@ -146,6 +147,8 @@ public class AbisMiddleWareStage extends MosipVerticleAPIManager {
 	/** The mosip event bus. */
 	MosipEventBus mosipEventBus = null;
 
+	@Autowired
+	@Qualifier("abisRequestExecutor")
 	private ExecutorService consumerExecutor;
 	private final ConcurrentHashMap<String, Boolean> processedBatches = new ConcurrentHashMap<>();
 	private ScheduledExecutorService batchCleanupScheduler;
@@ -168,7 +171,6 @@ public class AbisMiddleWareStage extends MosipVerticleAPIManager {
 	 */
 	public void deployVerticle() {
 		try {
-			consumerExecutor = Executors.newVirtualThreadPerTaskExecutor();
 			batchCleanupScheduler = Executors.newSingleThreadScheduledExecutor();
 			mosipEventBus = this.getEventBus(this, clusterManagerUrl, getWorkerPoolSize());
 			this.consume(mosipEventBus, MessageBusAddress.ABIS_MIDDLEWARE_BUS_IN, messageExpiryTimeLimit);

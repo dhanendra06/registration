@@ -12,7 +12,11 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+
+import org.springframework.beans.factory.annotation.Qualifier;
+
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.annotation.Bean;
 import java.util.stream.Collectors;
 
 import io.mosip.kernel.core.util.DateUtils2;
@@ -201,6 +205,10 @@ public class AbisHandlerStage extends MosipVerticleAPIManager {
 
 	@Autowired
 	private PriorityBasedPacketManagerService priorityBasedPacketManagerService;
+
+	@Autowired
+	@Qualifier("abisRequestExecutor")
+	private ExecutorService abisRequestExecutor;
 
 	private static final String DATASHARECREATEURL = "DATASHARECREATEURL";
 
@@ -592,7 +600,6 @@ public class AbisHandlerStage extends MosipVerticleAPIManager {
 				JsonUtil.getJSONObject(regProcessorIdentityJson, MappingJsonConstants.INDIVIDUAL_BIOMETRICS),
 				MappingJsonConstants.VALUE);
 		// Fetch biometrics, tags and metaInfo in parallel -- all three are independent
-		ExecutorService fetchExecutor = Executors.newVirtualThreadPerTaskExecutor();
 		CompletableFuture<BiometricRecord> bioFuture;
 		CompletableFuture<Map<String, String>> tagsFuture;
 		CompletableFuture<Map<String, String>> metaInfoFuture;
@@ -602,24 +609,22 @@ public class AbisHandlerStage extends MosipVerticleAPIManager {
 					return priorityBasedPacketManagerService.getBiometrics(id, individualBiometricsLabel,
 							policyTypeAndSubTypeList, process, ProviderStageName.BIO_DEDUPE);
 				} catch (Exception e) { throw new CompletionException(e); }
-			}, fetchExecutor);
+			}, abisRequestExecutor);
 			tagsFuture = CompletableFuture.supplyAsync(() -> {
 				try {
 					return packetManagerService.getAllTags(id);
 				} catch (Exception e) { throw new CompletionException(e); }
-			}, fetchExecutor);
+			}, abisRequestExecutor);
 			metaInfoFuture = CompletableFuture.supplyAsync(() -> {
 				try {
 					return priorityBasedPacketManagerService.getMetaInfo(id, process, ProviderStageName.BIO_DEDUPE);
 				} catch (Exception e) { throw new CompletionException(e); }
-			}, fetchExecutor);
+			}, abisRequestExecutor);
 			CompletableFuture.allOf(bioFuture, tagsFuture, metaInfoFuture).join();
 		} catch (CompletionException e) {
 			Throwable cause = e.getCause() != null ? e.getCause() : e;
 			if (cause instanceof Exception) throw (Exception) cause;
 			throw new RuntimeException(cause);
-		} finally {
-			fetchExecutor.close();
 		}
 		BiometricRecord biometricRecord = bioFuture.join();
 		Map<String, String> tags = tagsFuture.join();
