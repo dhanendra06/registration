@@ -201,34 +201,64 @@ public class PacketUploaderServiceImpl implements PacketUploaderService<MessageD
         SyncRegistrationEntity regEntity = null;
 
         try {
+            long t0 = System.currentTimeMillis();
             regEntity = syncRegistrationService.findByWorkflowInstanceId(messageDTO.getWorkflowInstanceId());
+            regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                    registrationId, "PERF::findByWorkflowInstanceId took " + (System.currentTimeMillis() - t0) + " ms");
+
+            long t1 = System.currentTimeMillis();
             dto = registrationStatusService.getRegistrationStatus(
                     registrationId, messageDTO.getReg_type(), messageDTO.getIteration(), regEntity.getWorkflowInstanceId());
+            regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                    registrationId, "PERF::getRegistrationStatus took " + (System.currentTimeMillis() - t1) + " ms");
 
             dto.setLatestTransactionTypeCode(RegistrationTransactionTypeCode.UPLOAD_PACKET.toString());
             dto.setRegistrationStageName(stageName);
 
+            long t2 = System.currentTimeMillis();
             final byte[] encryptedByteArray = getPakcetFromDMZ(regEntity.getPacketId(),registrationId);
+            regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                    registrationId, "PERF::getPacketFromDMZ took " + (System.currentTimeMillis() - t2) + " ms"
+                            + (encryptedByteArray != null ? ", size=" + encryptedByteArray.length + " bytes" : ", packet=null"));
 
             if (encryptedByteArray != null) {
 
+                long t3 = System.currentTimeMillis();
                 if (validateHashCode(new ByteArrayInputStream(encryptedByteArray), regEntity, registrationId, dto,
                         description)) {
+                    regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                            registrationId, "PERF::validateHashCode took " + (System.currentTimeMillis() - t3) + " ms");
+
+                    long t4 = System.currentTimeMillis();
                     InputStream decryptedPacket = decryptor.decrypt(
                             registrationId,
                             utility.getRefId(registrationId, regEntity.getReferenceId()),
                             new ByteArrayInputStream(encryptedByteArray));
                     final byte[] decryptedPacketBytes = IOUtils.toByteArray(decryptedPacket);
+                    regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                            registrationId, "PERF::decryptor.decrypt (outer packet) took " + (System.currentTimeMillis() - t4) + " ms");
+
+                    long t5 = System.currentTimeMillis();
                     // Unzip once; ByteArrayInputStream values are resettable for reuse in uploadPacket
                     Map<String, InputStream> unzippedFiles = ZipUtils.unzipAndGetFiles(new ByteArrayInputStream(decryptedPacketBytes));
+                    regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                            registrationId, "PERF::unzipAndGetFiles took " + (System.currentTimeMillis() - t5) + " ms"
+                                    + ", entries=" + unzippedFiles.size());
+
+                    long t6 = System.currentTimeMillis();
                     if (scanFile(encryptedByteArray, registrationId,
                             regEntity.getReferenceId(), unzippedFiles, dto, description, messageDTO)) {
+                        regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                                registrationId, "PERF::scanFile (all sub-packets) took " + (System.currentTimeMillis() - t6) + " ms");
                         int retrycount = (dto.getRetryCount() == null) ? 0 : dto.getRetryCount() + 1;
                         dto.setRetryCount(retrycount);
                         if (retrycount < getMaxRetryCount()) {
                             // Reset all ByteArrayInputStreams so uploadPacket can re-read them
                             unzippedFiles.values().forEach(is -> ((ByteArrayInputStream) is).reset());
+                            long t7 = System.currentTimeMillis();
                             messageDTO = uploadPacket(regEntity, dto, unzippedFiles, messageDTO, description);
+                            regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                                    registrationId, "PERF::uploadPacket took " + (System.currentTimeMillis() - t7) + " ms");
                             if (messageDTO.getIsValid()) {
                                 dto.setLatestTransactionStatusCode(
                                         RegistrationTransactionStatusCode.SUCCESS.toString());
@@ -418,17 +448,30 @@ public class PacketUploaderServiceImpl implements PacketUploaderService<MessageD
         try {
             InputStream packet = new ByteArrayInputStream(input);
             // scanning the top level packet
+            long vs0 = System.currentTimeMillis();
             isInputFileClean = virusScannerService.scanFile(packet);
+            regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                    id, "PERF::virusScan [encrypted-outer-packet] took " + (System.currentTimeMillis() - vs0) + " ms");
 
             if (isInputFileClean) {
                 // scanning the source packets (Like - id, evidence, optional packets).
                 for (final Map.Entry<String, InputStream> source : sourcePackets.entrySet()) {
                     if (source.getKey().endsWith(ZIP)) {
+                        long vsd0 = System.currentTimeMillis();
                         InputStream decryptedData = decryptor
                                 .decrypt(id, utility.getRefId(id, refId), source.getValue());
+                        regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                                id, "PERF::decryptor.decrypt [" + source.getKey() + "] took " + (System.currentTimeMillis() - vsd0) + " ms");
+                        long vs1 = System.currentTimeMillis();
                         isInputFileClean = virusScannerService.scanFile(decryptedData);
-                    } else
+                        regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                                id, "PERF::virusScan [" + source.getKey() + "] took " + (System.currentTimeMillis() - vs1) + " ms");
+                    } else {
+                        long vs2 = System.currentTimeMillis();
                         isInputFileClean = virusScannerService.scanFile(source.getValue());
+                        regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                                id, "PERF::virusScan [" + source.getKey() + "] took " + (System.currentTimeMillis() - vs2) + " ms");
+                    }
                     if (!isInputFileClean)
                         break;
                 }
@@ -513,13 +556,18 @@ public class PacketUploaderServiceImpl implements PacketUploaderService<MessageD
         object.setIsValid(false);
         String registrationId = dto.getRegistrationId();
         // Fetch additionalInfoRequest once (instead of once per sub-packet in getFinalKey)
+        long tai0 = System.currentTimeMillis();
         AdditionalInfoRequestDto additionalInfoRequestDto = isIterationAdditionEnabled ?
                 additionalInfoRequestService.getAdditionalInfoRequestByRegIdAndProcessAndIteration(
                         object.getRid(), object.getReg_type(), object.getIteration()) : null;
+        regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                registrationId, "PERF::getAdditionalInfoRequest took " + (System.currentTimeMillis() - tai0) + " ms");
+
         // Upload sub-packets and metadata in parallel using virtual threads
         ExecutorService uploadExecutor = Executors.newVirtualThreadPerTaskExecutor();
         try {
             // Phase 1: upload all ZIP sub-packets in parallel
+            long phase1Start = System.currentTimeMillis();
             List<CompletableFuture<Void>> zipFutures = new ArrayList<>();
             for (Map.Entry<String, InputStream> entry : sourcePackets.entrySet()) {
                 if (entry.getKey().endsWith(ZIP)) {
@@ -529,8 +577,11 @@ public class PacketUploaderServiceImpl implements PacketUploaderService<MessageD
                     final InputStream entryStream = entry.getValue();
                     final String entryKey = entry.getKey();
                     zipFutures.add(CompletableFuture.runAsync(() -> {
+                        long put0 = System.currentTimeMillis();
                         boolean result = objectStoreAdapter.putObject(packetManagerAccount, registrationId,
                                 null, null, objStoreKey, entryStream);
+                        regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                                registrationId, "PERF::objectStoreAdapter.putObject [" + entryKey + "] took " + (System.currentTimeMillis() - put0) + " ms");
                         if (!result)
                             throw new CompletionException(new ObjectStoreNotAccessibleException("Failed to store packet : " + entryKey));
                     }, uploadExecutor));
@@ -544,8 +595,11 @@ public class PacketUploaderServiceImpl implements PacketUploaderService<MessageD
                 if (cause instanceof ObjectStoreNotAccessibleException) throw (ObjectStoreNotAccessibleException) cause;
                 throw new ObjectStoreNotAccessibleException(cause.getMessage(), cause);
             }
+            regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                    registrationId, "PERF::Phase1 (ZIP uploads, " + zipFutures.size() + " parallel) total wall-time " + (System.currentTimeMillis() - phase1Start) + " ms");
 
             // Phase 2: upload all JSON metadata in parallel (after ZIPs are stored)
+            long phase2Start = System.currentTimeMillis();
             List<CompletableFuture<Void>> jsonFutures = new ArrayList<>();
             for (Map.Entry<String, InputStream> entry : sourcePackets.entrySet()) {
                 if (entry.getKey().endsWith(JSON)) {
@@ -554,9 +608,14 @@ public class PacketUploaderServiceImpl implements PacketUploaderService<MessageD
                     final String objStoreKey = isIterationAdditionEnabled ?
                             getFinalKey(regEntity, entry.getKey().replace(JSON, ""), object, additionalInfoRequestDto)
                             : entry.getKey().replace(JSON, "");
-                    jsonFutures.add(CompletableFuture.runAsync(() ->
-                            objectStoreAdapter.addObjectMetaData(packetManagerAccount, registrationId,
-                                    null, null, objStoreKey, currentIdMap), uploadExecutor));
+                    final String entryKey = entry.getKey();
+                    jsonFutures.add(CompletableFuture.runAsync(() -> {
+                        long meta0 = System.currentTimeMillis();
+                        objectStoreAdapter.addObjectMetaData(packetManagerAccount, registrationId,
+                                null, null, objStoreKey, currentIdMap);
+                        regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                                registrationId, "PERF::objectStoreAdapter.addObjectMetaData [" + entryKey + "] took " + (System.currentTimeMillis() - meta0) + " ms");
+                    }, uploadExecutor));
                 }
             }
             try {
@@ -566,6 +625,8 @@ public class PacketUploaderServiceImpl implements PacketUploaderService<MessageD
                 while (cause instanceof CompletionException && cause.getCause() != null) cause = cause.getCause();
                 throw new ObjectStoreNotAccessibleException(cause.getMessage(), cause);
             }
+            regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                    registrationId, "PERF::Phase2 (JSON metadata, " + jsonFutures.size() + " parallel) total wall-time " + (System.currentTimeMillis() - phase2Start) + " ms");
         } catch (ObjectStoreNotAccessibleException e) {
             object.setIsValid(false);
             object.setInternalError(true);
