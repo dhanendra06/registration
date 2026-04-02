@@ -91,9 +91,15 @@ public class PacketValidatorImpl implements PacketValidator {
             throws ApisResourceAccessException, RegistrationProcessorCheckedException, IOException,
             JsonProcessingException, PacketManagerException {
         String uin = null;
+        long validateStart = System.currentTimeMillis();
+        regProcLogger.info("PERF_packetvalidator_validate START for rid: {}", id);
         try {
+            long t0 = System.currentTimeMillis();
             ValidatePacketResponse response = packetManagerService.validate(id, process, ProviderStageName.PACKET_VALIDATOR);
+            regProcLogger.info("PERF_packetvalidator_packetManagerValidate took {} ms for rid: {}", (System.currentTimeMillis() - t0), id);
+            long t1 = System.currentTimeMillis();
             String consentVal = packetManagerService.getField(id, MappingJsonConstants.CONSENT, process, ProviderStageName.PACKET_VALIDATOR);
+            regProcLogger.info("PERF_packetvalidator_getConsentField took {} ms for rid: {}", (System.currentTimeMillis() - t1), id);
             if (!response.isValid()) {
                 regProcLogger.error(LoggerFileConstant.SESSIONID.toString(),
                         LoggerFileConstant.REGISTRATIONID.toString(), id,
@@ -141,12 +147,15 @@ public class PacketValidatorImpl implements PacketValidator {
 
             // document validation - pass map to cache INDIVIDUAL_BIOMETRICS and INTRODUCER_BIO for reuse in biometricsXSDValidation
             Map<String, BiometricRecord> fetchedBiometrics = new HashMap<>();
+            long t2 = System.currentTimeMillis();
             if (!applicantDocumentValidation(id, process, packetValidationDto, fetchedBiometrics)) {
+                regProcLogger.info("PERF_packetvalidator_applicantDocumentValidation took {} ms (FAILED) for rid: {}", (System.currentTimeMillis() - t2), id);
                 regProcLogger.error(LoggerFileConstant.SESSIONID.toString(),
                         LoggerFileConstant.REGISTRATIONID.toString(), id,
                         "ERROR =======>" + StatusUtil.APPLICANT_DOCUMENT_VALIDATION_FAILED.getMessage());
                 return false;
             }
+            regProcLogger.info("PERF_packetvalidator_applicantDocumentValidation took {} ms for rid: {}", (System.currentTimeMillis() - t2), id);
 
             // check if uin is in idrepisitory
             if (RegistrationType.UPDATE.name().equalsIgnoreCase(process)
@@ -162,9 +171,12 @@ public class PacketValidatorImpl implements PacketValidator {
                 }
             }
 
+            long t3 = System.currentTimeMillis();
             if (!biometricsXSDValidation(id, process, packetValidationDto, metaInfo, fetchedBiometrics)) {
+                regProcLogger.info("PERF_packetvalidator_biometricsXSDValidation took {} ms (FAILED) for rid: {}", (System.currentTimeMillis() - t3), id);
                 return false;
             }
+            regProcLogger.info("PERF_packetvalidator_biometricsXSDValidation took {} ms for rid: {}", (System.currentTimeMillis() - t3), id);
         } catch(PacketManagerNonRecoverableException e){
             regProcLogger.error(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
                     id, RegistrationStatusCode.FAILED.toString() + e.getMessage() + ExceptionUtils.getStackTrace(e));
@@ -182,6 +194,7 @@ public class PacketValidatorImpl implements PacketValidator {
         }
 
         packetValidationDto.setValid(true);
+        regProcLogger.info("PERF_packetvalidator_validate END - total time {} ms for rid: {}", (System.currentTimeMillis() - validateStart), id);
         return packetValidationDto.isValid();
     }
 
@@ -199,32 +212,45 @@ public class PacketValidatorImpl implements PacketValidator {
         final Map<String, String> finalMetaInfoMap = metaInfoMap;
 
         // Validate all biometric fields in parallel using virtual threads (fail-fast: cancel remaining on first failure)
+        long xsdAllStart = System.currentTimeMillis();
+        regProcLogger.info("PERF_packetvalidator_biometricsXSDValidation allFields START for rid: {}", id);
         ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
         try {
             List<CompletableFuture<Void>> futures = fields.stream()
                     .map(field -> CompletableFuture.runAsync(() -> {
                         try {
+                            long tField = System.currentTimeMillis();
                             BiometricRecord biometricRecord = null;
                             if (field.equals(MappingJsonConstants.OFFICERBIOMETRICFILENAME)
                                     || field.equals(MappingJsonConstants.SUPERVISORBIOMETRICFILENAME)) {
                                 String value = getOperationsDataFromMetaInfo(id, process, field, finalMetaInfoMap);
                                 if (value != null && !value.isEmpty()) {
+                                    long tFetch = System.currentTimeMillis();
                                     biometricRecord = packetManagerService.getBiometrics(id, field, process,
                                             ProviderStageName.PACKET_VALIDATOR);
+                                    regProcLogger.info("PERF_packetvalidator_getBiometrics field={} took {} ms for rid: {}", field, (System.currentTimeMillis() - tFetch), id);
                                 }
                             } else {
                                 // For INDIVIDUAL_BIOMETRICS and INTRODUCER_BIO, reuse if already fetched by ApplicantDocumentValidation
                                 if (fetchedBiometrics != null && fetchedBiometrics.containsKey(field)) {
                                     biometricRecord = fetchedBiometrics.get(field);
+                                    regProcLogger.info("PERF_packetvalidator_getBiometrics field={} reused from cache for rid: {}", field, id);
                                 } else {
+                                    long tFetch = System.currentTimeMillis();
                                     biometricRecord = packetManagerService.getBiometricsByMappingJsonKey(id, field, process,
                                             ProviderStageName.PACKET_VALIDATOR);
+                                    regProcLogger.info("PERF_packetvalidator_getBiometricsByMappingJsonKey field={} took {} ms for rid: {}", field, (System.currentTimeMillis() - tFetch), id);
                                 }
                             }
                             if (biometricRecord != null) {
+                                long tXsd = System.currentTimeMillis();
                                 biometricsXSDValidator.validateXSD(biometricRecord);
+                                regProcLogger.info("PERF_packetvalidator_validateXSD field={} took {} ms for rid: {}", field, (System.currentTimeMillis() - tXsd), id);
+                                long tSig = System.currentTimeMillis();
                                 biometricsSignatureValidator.validateSignature(id, process, biometricRecord, finalMetaInfoMap);
+                                regProcLogger.info("PERF_packetvalidator_validateSignature field={} took {} ms for rid: {}", field, (System.currentTimeMillis() - tSig), id);
                             }
+                            regProcLogger.info("PERF_packetvalidator_biometricField field={} total took {} ms for rid: {}", field, (System.currentTimeMillis() - tField), id);
                         } catch (Exception e) {
                             throw new CompletionException(e);
                         }
@@ -233,6 +259,7 @@ public class PacketValidatorImpl implements PacketValidator {
 
             try {
                 CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+                regProcLogger.info("PERF_packetvalidator_biometricsXSDValidation allFields completed in {} ms for rid: {}", (System.currentTimeMillis() - xsdAllStart), id);
             } catch (CompletionException e) {
                 // Interrupt remaining in-flight threads immediately (fail-fast)
                 executor.shutdownNow();
