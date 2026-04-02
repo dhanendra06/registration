@@ -379,34 +379,61 @@ public class WorkflowInternalActionVerticle extends MosipVerticleAPIManager {
 	private void processCompleteAsProcessed(WorkflowInternalActionDTO workflowInternalActionDTO)
 			throws ApisResourceAccessException, PacketManagerException, JsonProcessingException, IOException,
 			WorkflowActionException {
+		String rid = workflowInternalActionDTO.getRid();
+		long methodStart = System.currentTimeMillis();
+		regProcLogger.info("processCompleteAsProcessed START for rid: {}", rid);
+
+		long t0 = System.currentTimeMillis();
 		AdditionalInfoRequestDto additionalInfoRequestDto = additionalInfoRequestService
-				.getAdditionalInfoRequestByRegIdAndProcessAndIteration(workflowInternalActionDTO.getRid(),
+				.getAdditionalInfoRequestByRegIdAndProcessAndIteration(rid,
 						workflowInternalActionDTO.getReg_type(), workflowInternalActionDTO.getIteration());
+		regProcLogger.info("processCompleteAsProcessed - getAdditionalInfoRequestByRegIdAndProcessAndIteration took {} ms for rid: {}", (System.currentTimeMillis() - t0), rid);
+
+		long t1 = System.currentTimeMillis();
 		InternalRegistrationStatusDto registrationStatusDto = registrationStatusService
-			.getRegistrationStatus(workflowInternalActionDTO.getRid(), workflowInternalActionDTO.getReg_type(),
+			.getRegistrationStatus(rid, workflowInternalActionDTO.getReg_type(),
 				workflowInternalActionDTO.getIteration(), workflowInternalActionDTO.getWorkflowInstanceId());
+		regProcLogger.info("processCompleteAsProcessed - getRegistrationStatus took {} ms for rid: {}", (System.currentTimeMillis() - t1), rid);
+
 		registrationStatusDto.setStatusComment(workflowInternalActionDTO.getActionMessage());
 		registrationStatusDto.setStatusCode(RegistrationStatusCode.PROCESSED.toString());
 		registrationStatusDto.setLatestTransactionTypeCode(RegistrationTransactionTypeCode.INTERNAL_WORKFLOW_ACTION.toString());
 		registrationStatusDto.setSubStatusCode(StatusUtil.WORKFLOW_INTERNAL_ACTION_SUCCESS.getCode());
+
+		long t2 = System.currentTimeMillis();
 		registrationStatusService.updateRegistrationStatusForWorkflowEngine(registrationStatusDto, MODULE_ID, MODULE_NAME);
+		regProcLogger.info("processCompleteAsProcessed - updateRegistrationStatusForWorkflowEngine took {} ms for rid: {}", (System.currentTimeMillis() - t2), rid);
+
 		if (additionalInfoRequestDto != null) {
 			Map<String, String> tags = new HashMap<String, String>();
 			tags.put(workflowInternalActionDTO.getReg_type() + "_FLOW_STATUS",
 					RegistrationStatusCode.PROCESSED.toString());
-			packetManagerService.addOrUpdateTags(workflowInternalActionDTO.getRid(), tags);
+
+			long t3 = System.currentTimeMillis();
+			packetManagerService.addOrUpdateTags(rid, tags);
+			regProcLogger.info("processCompleteAsProcessed - addOrUpdateTags took {} ms for rid: {}", (System.currentTimeMillis() - t3), rid);
+
+			long t4 = System.currentTimeMillis();
 			InternalRegistrationStatusDto mainFlowregistrationStatusDto = registrationStatusService
 					.getRegistrationStatus(null, null, null, additionalInfoRequestDto.getWorkflowInstanceId());
+			regProcLogger.info("processCompleteAsProcessed - getRegistrationStatus (main flow) took {} ms for rid: {}", (System.currentTimeMillis() - t4), rid);
+
 			mainFlowregistrationStatusDto
 					.setLatestTransactionStatusCode(RegistrationTransactionStatusCode.REPROCESS.toString());
 			List<InternalRegistrationStatusDto> internalRegistrationStatusDtos = new ArrayList<InternalRegistrationStatusDto>();
 			internalRegistrationStatusDtos.add(mainFlowregistrationStatusDto);
+
+			long t5 = System.currentTimeMillis();
 			workflowActionService.processWorkflowAction(internalRegistrationStatusDtos,
 					WorkflowActionCode.RESUME_PROCESSING.toString());
+			regProcLogger.info("processCompleteAsProcessed - processWorkflowAction took {} ms for rid: {}", (System.currentTimeMillis() - t5), rid);
 		} else {
+			long t6 = System.currentTimeMillis();
 			sendWorkflowCompletedWebSubEvent(registrationStatusDto);
+			regProcLogger.info("processCompleteAsProcessed - sendWorkflowCompletedWebSubEvent took {} ms for rid: {}", (System.currentTimeMillis() - t6), rid);
 		}
 
+		regProcLogger.info("processCompleteAsProcessed END - total time {} ms for rid: {}", (System.currentTimeMillis() - methodStart), rid);
 	}
 
 	private void processPacketForPaused(WorkflowInternalActionDTO workflowInternalActionDTO) {
