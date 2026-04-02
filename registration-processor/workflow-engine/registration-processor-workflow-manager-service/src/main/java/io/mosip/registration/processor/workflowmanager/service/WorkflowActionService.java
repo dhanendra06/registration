@@ -277,15 +277,21 @@ public class WorkflowActionService {
 		for (InternalRegistrationStatusDto internalRegistrationStatusDto : internalRegistrationStatusDtos) {
 			String rid = internalRegistrationStatusDto.getRegistrationId();
 				try {
+						long tAddRule = System.currentTimeMillis();
 				addRuleIdsToTag(internalRegistrationStatusDto);
+				regProcLogger.info("PERF_workflowaction_addRuleIdsToTag took {} ms for rid: {}", (System.currentTimeMillis() - tAddRule), rid);
 				if (RegistrationTransactionStatusCode.REPROCESS_FAILED.name()
 								.equals(internalRegistrationStatusDto.getLatestTransactionStatusCode())) {
+							long tUpdate = System.currentTimeMillis();
 							internalRegistrationStatusDto = updateRegistrationStatus(internalRegistrationStatusDto,
 									RegistrationStatusCode.REPROCESS_FAILED, workflowActionCode);
+							regProcLogger.info("PERF_workflowaction_updateStatus REPROCESS_FAILED took {} ms for rid: {}", (System.currentTimeMillis() - tUpdate), rid);
 							description.setMessage(PlatformErrorMessages.RPR_WAS_REPROCESS_FAILED.getMessage());
 					} else {
+						long tUpdate = System.currentTimeMillis();
 						internalRegistrationStatusDto = updateRegistrationStatus(internalRegistrationStatusDto,
 							RegistrationStatusCode.RESUMABLE, workflowActionCode);
+						regProcLogger.info("PERF_workflowaction_updateStatus RESUMABLE took {} ms for rid: {}", (System.currentTimeMillis() - tUpdate), rid);
 							description.setMessage(String.format(
 									PlatformSuccessMessages.RPR_WORKFLOW_ACTION_SERVICE_SUCCESS.getMessage(),
 								workflowActionCode.name()));
@@ -324,31 +330,34 @@ public class WorkflowActionService {
 		if (StringUtils.isEmpty(pauseRuleIds))
 			return;
 
+		String rid = internalRegistrationStatusDto.getRegistrationId();
 		List<String> tags = new ArrayList<String>();
 		tags.add("PAUSE_IMMUNITY_RULE_IDS");
-		Map<String, String> tagsPresent=packetManagerService.getTags(internalRegistrationStatusDto.getRegistrationId(), tags);
-        String pauseRuleImmunityTag="";
-        Set<String> rulesSet=new HashSet<String>();
-		if(tagsPresent!=null) {
-			pauseRuleImmunityTag=tagsPresent.get("PAUSE_IMMUNITY_RULE_IDS");
-			if(!pauseRuleImmunityTag.isEmpty()) {
+		long tGetTags = System.currentTimeMillis();
+		Map<String, String> tagsPresent = packetManagerService.getTags(rid, tags);
+		regProcLogger.info("PERF_workflowaction_addRuleIdsToTag_getTags took {} ms for rid: {}", (System.currentTimeMillis() - tGetTags), rid);
+		String pauseRuleImmunityTag = "";
+		Set<String> rulesSet = new HashSet<String>();
+		if (tagsPresent != null) {
+			pauseRuleImmunityTag = tagsPresent.get("PAUSE_IMMUNITY_RULE_IDS");
+			if (pauseRuleImmunityTag != null && !pauseRuleImmunityTag.isEmpty()) {
 				rulesSet.addAll(Arrays.asList(pauseRuleImmunityTag.split(", ")));
 			}
-           }
+		}
 		String[] pauseRuleIdsArray = internalRegistrationStatusDto.getPauseRuleIds().split(",");
 		if (pauseRuleIdsArray.length > 0) {
 			for (int i = 0; i < pauseRuleIdsArray.length; i++) {
-				if(!rulesSet.contains(pauseRuleIdsArray[i])) {
+				if (!rulesSet.contains(pauseRuleIdsArray[i])) {
 					rulesSet.add(pauseRuleIdsArray[i]);
 				}
 			}
 		}
-        //String.join(", ", rulesSet);
-		Map<String,String> tagsToAdd=new HashMap<String,String>();
+		Map<String, String> tagsToAdd = new HashMap<String, String>();
 		tagsToAdd.put("PAUSE_IMMUNITY_RULE_IDS", String.join(", ", rulesSet));
-		packetManagerService.addOrUpdateTags(internalRegistrationStatusDto.getRegistrationId(), tagsToAdd);
-		regProcLogger.debug("addRuleIdsToTag called for workflowId {}",
-				internalRegistrationStatusDto.getRegistrationId());
+		long tAddTags = System.currentTimeMillis();
+		packetManagerService.addOrUpdateTags(rid, tagsToAdd);
+		regProcLogger.info("PERF_workflowaction_addRuleIdsToTag_addOrUpdateTags took {} ms for rid: {}", (System.currentTimeMillis() - tAddTags), rid);
+		regProcLogger.debug("addRuleIdsToTag called for workflowId {}", rid);
 
 
 	}

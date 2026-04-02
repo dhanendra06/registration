@@ -320,6 +320,12 @@ public abstract class MosipVerticleManager extends AbstractVerticle
 			messageDTO.setTags(new HashMap<>());
 			return;
 		}
+		// Tags are fetched once per processing cycle inside send().
+		// consumeAndSend calls this again after process() returns on the same object —
+		// skip the duplicate REST call if tags are already loaded.
+		if (messageDTO.getTags() != null) {
+			return;
+		}
 		try {
 			messageDTO.setTags(getTagsFromPacket(messageDTO.getRid()));
 		} catch (ApisResourceAccessException | PacketManagerException |
