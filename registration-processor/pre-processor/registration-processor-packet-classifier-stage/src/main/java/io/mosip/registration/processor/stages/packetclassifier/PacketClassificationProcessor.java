@@ -199,7 +199,6 @@ public class PacketClassificationProcessor {
 		LogDescription description = new LogDescription();
 		boolean isTransactionSuccessful = false;
 		String registrationId = "";
-		long processStart = System.currentTimeMillis();
 
 		InternalRegistrationStatusDto registrationStatusDto = new InternalRegistrationStatusDto();
 		registrationStatusDto.setLatestTransactionTypeCode(
@@ -215,21 +214,16 @@ public class PacketClassificationProcessor {
 				LoggerFileConstant.REGISTRATIONID.toString(), "",
 				"PacketClassificationProcessor::process()::entry");
 			registrationId = object.getRid();
-			regProcLogger.info("PacketClassificationProcessor process START for rid: {}", registrationId);
 
-			long t0 = System.currentTimeMillis();
 			registrationStatusDto = registrationStatusService.getRegistrationStatus(
 					registrationId, object.getReg_type(), object.getIteration(), object.getWorkflowInstanceId());
-			regProcLogger.info("PacketClassificationProcessor - getRegistrationStatus took {} ms for rid: {}", (System.currentTimeMillis() - t0), registrationId);
 
 			registrationStatusDto.setLatestTransactionTypeCode(
 						RegistrationTransactionTypeCode.PACKET_CLASSIFICATION.toString());
 			registrationStatusDto.setRegistrationStageName(stageName);
 
-			long t1 = System.currentTimeMillis();
 			generateAndAddTags(registrationStatusDto.getWorkflowInstanceId(), registrationId,
 				registrationStatusDto.getRegistrationType(), object.getIteration());
-			regProcLogger.info("PacketClassificationProcessor - generateAndAddTags total took {} ms for rid: {}", (System.currentTimeMillis() - t1), registrationId);
 
 			object.setTags(null);
 
@@ -299,10 +293,7 @@ public class PacketClassificationProcessor {
 			/** Module-Id can be Both Success/Error code */
 			String moduleId = description.getCode();
 			String moduleName = ModuleName.PACKET_CLASSIFIER.toString();
-			long tUpdate = System.currentTimeMillis();
 			registrationStatusService.updateRegistrationStatus(registrationStatusDto, moduleId, moduleName);
-			regProcLogger.info("PacketClassificationProcessor - updateRegistrationStatus took {} ms for rid: {}", (System.currentTimeMillis() - tUpdate), registrationId);
-			regProcLogger.info("PacketClassificationProcessor process END - total time {} ms for rid: {}", (System.currentTimeMillis() - processStart), registrationId);
 			updateAudit(description, isTransactionSuccessful, moduleId, moduleName, registrationId);
 		}
 
@@ -348,7 +339,6 @@ public class PacketClassificationProcessor {
 		ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 		try {
 			// Fire getMetaInfo in parallel while processing identity fields — they are independent I/O calls
-			long tMetaInfoStart = System.currentTimeMillis();
 			CompletableFuture<Map<String, String>> metaInfoFuture = CompletableFuture.supplyAsync(() -> {
 				try {
 					return priorityBasedPacketManagerService.getMetaInfo(registrationId, process, ProviderStageName.CLASSIFICATION);
@@ -357,21 +347,16 @@ public class PacketClassificationProcessor {
 				}
 			}, executor);
 
-			long tGetFields = System.currentTimeMillis();
 			Map<String, String> identityFieldValueMap = priorityBasedPacketManagerService.getFields(registrationId,
 				requiredIdObjectFieldNames, process, ProviderStageName.CLASSIFICATION);
-			regProcLogger.info("generateAndAddTags - getFields took {} ms for rid: {}", (System.currentTimeMillis() - tGetFields), registrationId);
 
-			long tFieldTypeMap = System.currentTimeMillis();
 			Map<String, String> fieldTypeMap = getFieldTypeMap(identityFieldValueMap.get(idSchemaVersionLabel));
-			regProcLogger.info("generateAndAddTags - getFieldTypeMap (idSchema fetch) took {} ms for rid: {}", (System.currentTimeMillis() - tFieldTypeMap), registrationId);
 
 			Map<String, FieldDTO> idObjectFieldDTOMap = getIdObjectFieldDTOMap(identityFieldValueMap, fieldTypeMap);
 
 			Map<String, String> metaInfoMap;
 			try {
 				metaInfoMap = metaInfoFuture.join();
-				regProcLogger.info("generateAndAddTags - getMetaInfo (async) took {} ms for rid: {}", (System.currentTimeMillis() - tMetaInfoStart), registrationId);
 			} catch (CompletionException e) {
 				Throwable cause = e.getCause();
 				// Unwrap double-wrapping: Supplier wraps in CompletionException, then join() wraps again
@@ -384,19 +369,12 @@ public class PacketClassificationProcessor {
 			}
 
 			// Run tag generators in parallel — AgeGroupTagGenerator makes its own I/O call (getApplicantAge)
-			long tTagGeneratorsStart = System.currentTimeMillis();
 			List<CompletableFuture<Map<String, String>>> tagFutures = tagGenerators.stream()
 					.map(tagGenerator -> CompletableFuture.supplyAsync(() -> {
-						long tGen = System.currentTimeMillis();
 						try {
-							Map<String, String> result = tagGenerator.generateTags(workflowInstanceId, registrationId, process,
+							return tagGenerator.generateTags(workflowInstanceId, registrationId, process,
 									idObjectFieldDTOMap, metaInfoMap, iteration);
-							regProcLogger.info("generateAndAddTags - tagGenerator {} took {} ms for rid: {}",
-									tagGenerator.getClass().getSimpleName(), (System.currentTimeMillis() - tGen), registrationId);
-							return result;
 						} catch (Exception e) {
-							regProcLogger.error("generateAndAddTags - tagGenerator {} failed after {} ms for rid: {}",
-									tagGenerator.getClass().getSimpleName(), (System.currentTimeMillis() - tGen), registrationId);
 							throw new CompletionException(e);
 						}
 					}, executor))
@@ -404,7 +382,6 @@ public class PacketClassificationProcessor {
 
 			try {
 				CompletableFuture.allOf(tagFutures.toArray(new CompletableFuture[0])).join();
-				regProcLogger.info("generateAndAddTags - all tagGenerators completed in {} ms for rid: {}", (System.currentTimeMillis() - tTagGeneratorsStart), registrationId);
 			} catch (CompletionException e) {
 				executor.shutdownNow();
 				Throwable cause = e.getCause();
@@ -426,11 +403,8 @@ public class PacketClassificationProcessor {
 
 			handleNullValueTags(allTags);
 			regProcLogger.debug("generated tags {}", new JSONObject(allTags).toString());
-			if (!allTags.isEmpty()) {
-				long tAddTags = System.currentTimeMillis();
+			if (!allTags.isEmpty())
 				packetManagerService.addOrUpdateTags(registrationId, allTags);
-				regProcLogger.info("generateAndAddTags - addOrUpdateTags took {} ms for rid: {}", (System.currentTimeMillis() - tAddTags), registrationId);
-			}
 		} finally {
 			executor.close();
 		}

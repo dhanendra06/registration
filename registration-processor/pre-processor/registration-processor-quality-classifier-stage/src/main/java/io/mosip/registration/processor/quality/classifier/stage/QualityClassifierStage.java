@@ -225,15 +225,20 @@ public class QualityClassifierStage extends MosipVerticleAPIManager {
 		object.setInternalError(Boolean.FALSE);
 		object.setIsValid(Boolean.FALSE);
 		Boolean isTransactionSuccessful = Boolean.FALSE;
+		long processStart = System.currentTimeMillis();
 		regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.USERID.toString(), regId,
 				"QualityCheckerStage::process()::entry");
+		regProcLogger.info("PERF_qualityclassifier_process START for rid: {}", regId);
 
+		long t0 = System.currentTimeMillis();
 		InternalRegistrationStatusDto registrationStatusDto = registrationStatusService.getRegistrationStatus(regId,
 				object.getReg_type(), object.getIteration(), object.getWorkflowInstanceId());
+		regProcLogger.info("PERF_qualityclassifier_getRegistrationStatus took {} ms for rid: {}", (System.currentTimeMillis() - t0), regId);
 
 		try {
 			// Fire getBiometricsByMappingJsonKey in parallel with getFieldByMappingJsonKey — both hit packet manager
 			// For the common case (biometrics present) this saves one sequential HTTP round-trip
+			long tBiometricFutureStart = System.currentTimeMillis();
 			CompletableFuture<BiometricRecord> biometricFuture = CompletableFuture.supplyAsync(() -> {
 				try {
 					return basedPacketManagerService.getBiometricsByMappingJsonKey(regId,
@@ -244,13 +249,17 @@ public class QualityClassifierStage extends MosipVerticleAPIManager {
 				}
 			});
 
+			long tGetField = System.currentTimeMillis();
 			String individualBiometricsObject = basedPacketManagerService.getFieldByMappingJsonKey(regId,
 					MappingJsonConstants.INDIVIDUAL_BIOMETRICS, registrationStatusDto.getRegistrationType(),
 					ProviderStageName.QUALITY_CHECKER);
+			regProcLogger.info("PERF_qualityclassifier_getFieldByMappingJsonKey took {} ms for rid: {}", (System.currentTimeMillis() - tGetField), regId);
 
 			if (StringUtils.isEmpty(individualBiometricsObject)) {
 				biometricFuture.cancel(true);
+				long tAddTagsEmpty = System.currentTimeMillis();
 				packetManagerService.addOrUpdateTags(regId, getQualityTags(regId, null));
+				regProcLogger.info("PERF_qualityclassifier_addOrUpdateTags (no-biometric) took {} ms for rid: {}", (System.currentTimeMillis() - tAddTagsEmpty), regId);
 				description.setCode(PlatformErrorMessages.INDIVIDUAL_BIOMETRIC_NOT_FOUND.getCode());
 				description.setMessage(PlatformErrorMessages.INDIVIDUAL_BIOMETRIC_NOT_FOUND.getMessage());
 				object.setIsValid(Boolean.TRUE);
@@ -266,6 +275,7 @@ public class QualityClassifierStage extends MosipVerticleAPIManager {
 				BiometricRecord biometricRecord;
 				try {
 					biometricRecord = biometricFuture.join();
+					regProcLogger.info("PERF_qualityclassifier_getBiometricsByMappingJsonKey (async) took {} ms for rid: {}", (System.currentTimeMillis() - tBiometricFutureStart), regId);
 				} catch (CompletionException e) {
 					Throwable cause = e.getCause();
 					while (cause instanceof CompletionException && cause.getCause() != null)
@@ -276,9 +286,11 @@ public class QualityClassifierStage extends MosipVerticleAPIManager {
 				}
 
 				if (biometricRecord == null || CollectionUtils.isEmpty(biometricRecord.getSegments())) {
+					long tFallbackBio = System.currentTimeMillis();
 					biometricRecord = basedPacketManagerService.getBiometricsByMappingJsonKey(regId,
 							MappingJsonConstants.AUTHENTICATION_BIOMETRICS, registrationStatusDto.getRegistrationType(),
 							ProviderStageName.QUALITY_CHECKER);
+					regProcLogger.info("PERF_qualityclassifier_getBiometricsByMappingJsonKey (fallback auth) took {} ms for rid: {}", (System.currentTimeMillis() - tFallbackBio), regId);
 				}
 
 				if (biometricRecord == null || biometricRecord.getSegments() == null
@@ -292,7 +304,13 @@ public class QualityClassifierStage extends MosipVerticleAPIManager {
 							PlatformErrorMessages.RPR_QCR_BIO_FILE_MISSING.getMessage());
 				}
 
-				packetManagerService.addOrUpdateTags(regId, getQualityTags(regId, biometricRecord.getSegments()));
+				long tGetQualityTags = System.currentTimeMillis();
+				Map<String, String> qualityTags = getQualityTags(regId, biometricRecord.getSegments());
+				regProcLogger.info("PERF_qualityclassifier_getQualityTags took {} ms for rid: {}", (System.currentTimeMillis() - tGetQualityTags), regId);
+
+				long tAddTags = System.currentTimeMillis();
+				packetManagerService.addOrUpdateTags(regId, qualityTags);
+				regProcLogger.info("PERF_qualityclassifier_addOrUpdateTags took {} ms for rid: {}", (System.currentTimeMillis() - tAddTags), regId);
 
 				regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.USERID.toString(), regId,
 						"UpdatingTags::success ");
@@ -424,7 +442,10 @@ public class QualityClassifierStage extends MosipVerticleAPIManager {
 			String moduleId = isTransactionSuccessful ? PlatformSuccessMessages.RPR_QUALITY_CHECK_SUCCESS.getCode()
 					: description.getCode();
 			String moduleName = ModuleName.QUALITY_CLASSIFIER.toString();
+			long tUpdate = System.currentTimeMillis();
 			registrationStatusService.updateRegistrationStatus(registrationStatusDto, moduleId, moduleName);
+			regProcLogger.info("PERF_qualityclassifier_updateRegistrationStatus took {} ms for rid: {}", (System.currentTimeMillis() - tUpdate), regId);
+			regProcLogger.info("PERF_qualityclassifier_process END - total time {} ms for rid: {}", (System.currentTimeMillis() - processStart), regId);
 			String eventId = isTransactionSuccessful ? EventId.RPR_402.toString() : EventId.RPR_405.toString();
 			String eventName = isTransactionSuccessful ? EventName.UPDATE.toString() : EventName.EXCEPTION.toString();
 			String eventType = isTransactionSuccessful ? EventType.BUSINESS.toString() : EventType.SYSTEM.toString();
@@ -463,6 +484,7 @@ public class QualityClassifierStage extends MosipVerticleAPIManager {
 		// Virtual threads are ideal here because bio SDK calls are typically I/O-bound (HTTP to biometric service).
 		// Previously ForkJoinPool.submit().join() blocked the Vert.x worker thread; virtual threads avoid that.
 		ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+		long tBioSdkAll = System.currentTimeMillis();
 		try {
 			List<CompletableFuture<Void>> futures = birs.stream()
 					.filter(bir -> {
@@ -476,14 +498,17 @@ public class QualityClassifierStage extends MosipVerticleAPIManager {
 						return !biometricType.name().equalsIgnoreCase(BiometricType.EXCEPTION_PHOTO.name());
 					})
 					.map(bir -> CompletableFuture.runAsync(() -> {
+						BiometricType biometricType = bir.getBdbInfo().getType().get(0);
+						long tBir = System.currentTimeMillis();
 						try {
-							BiometricType biometricType = bir.getBdbInfo().getType().get(0);
 							BIR[] birArray = {bir};
 							float[] qualityScoreResponse = getBioSdkInstance(biometricType).getSegmentQuality(birArray, null);
 							float score = qualityScoreResponse[0];
 							String bioType = biometricType.value();
+							regProcLogger.info("PERF_qualityclassifier_getSegmentQuality bioType={} took {} ms for rid: {}", bioType, (System.currentTimeMillis() - tBir), regId);
 							bioTypeScoreMap.computeIfAbsent(bioType, k -> Collections.synchronizedList(new ArrayList<>())).add(score);
 						} catch (BiometricException e) {
+							regProcLogger.error("PERF_qualityclassifier_getSegmentQuality bioType={} failed after {} ms for rid: {}", biometricType.value(), (System.currentTimeMillis() - tBir), regId);
 							throw new CompletionException(e);
 						}
 					}, executor))
@@ -491,6 +516,7 @@ public class QualityClassifierStage extends MosipVerticleAPIManager {
 
 			try {
 				CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+				regProcLogger.info("PERF_qualityclassifier_allBioSegmentQuality completed in {} ms for rid: {}", (System.currentTimeMillis() - tBioSdkAll), regId);
 			} catch (CompletionException e) {
 				Throwable cause = e.getCause();
 				while (cause instanceof CompletionException && cause.getCause() != null)
