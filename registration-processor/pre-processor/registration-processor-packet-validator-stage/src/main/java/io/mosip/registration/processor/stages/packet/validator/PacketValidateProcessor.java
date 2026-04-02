@@ -178,6 +178,7 @@ public class PacketValidateProcessor {
 		LogDescription description = new LogDescription();
 		PacketValidationDto packetValidationDto = new PacketValidationDto();
 		String registrationId = null;
+		long processStart = System.currentTimeMillis();
 		InternalRegistrationStatusDto registrationStatusDto = new InternalRegistrationStatusDto();
 		try {
 			object.setMessageBusAddress(MessageBusAddress.PACKET_VALIDATOR_BUS_IN);
@@ -186,22 +187,37 @@ public class PacketValidateProcessor {
 			regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
 					"", "PacketValidateProcessor::process()::entry");
 			registrationId = object.getRid();
+			regProcLogger.info("PERF_packetvalidator_process START for rid: {}", registrationId);
 			packetValidationDto.setTransactionSuccessful(false);
+
+			long t0 = System.currentTimeMillis();
 			registrationStatusDto = registrationStatusService.getRegistrationStatus(
 					registrationId, object.getReg_type(), object.getIteration(), object.getWorkflowInstanceId());
+			regProcLogger.info("PERF_packetvalidator_getRegistrationStatus took {} ms for rid: {}", (System.currentTimeMillis() - t0), registrationId);
+
 			registrationStatusDto
 					.setLatestTransactionTypeCode(RegistrationTransactionTypeCode.VALIDATE_PACKET.toString());
 			registrationStatusDto.setRegistrationStageName(stageName);
+
 			// Fetch metaInfo once and reuse for setPacketCreatedDateTime, validate (biometricsXSDValidation), and reverseDataSync
+			long t1 = System.currentTimeMillis();
 			Map<String, String> metaInfo = packetManagerService.getMetaInfo(
 					registrationStatusDto.getRegistrationId(), registrationStatusDto.getRegistrationType(), ProviderStageName.PACKET_VALIDATOR);
+			regProcLogger.info("PERF_packetvalidator_getMetaInfo took {} ms for rid: {}", (System.currentTimeMillis() - t1), registrationId);
+
 			setPacketCreatedDateTime(registrationStatusDto, metaInfo);
+
 			// Fetch entity once for supervisor status check and sendNotification (eliminates duplicate DB call)
+			long t2 = System.currentTimeMillis();
 			SyncRegistrationEntity regEntity = syncRegistrationService.findByWorkflowInstanceId(object.getWorkflowInstanceId());
+			regProcLogger.info("PERF_packetvalidator_findByWorkflowInstanceId took {} ms for rid: {}", (System.currentTimeMillis() - t2), registrationId);
+
 			boolean isValidSupervisorStatus = regEntity.getSupervisorStatus().equalsIgnoreCase(APPROVED);
 			if (isValidSupervisorStatus) {
+				long t3 = System.currentTimeMillis();
 				Boolean isValid = compositePacketValidator.validate(object.getRid(),
 						registrationStatusDto.getRegistrationType(), packetValidationDto, metaInfo);
+				regProcLogger.info("PERF_packetvalidator_compositeValidate took {} ms for rid: {}", (System.currentTimeMillis() - t3), registrationId);
 
 				if (isValid) {
 					// save audit details
@@ -228,8 +244,10 @@ public class PacketValidateProcessor {
 					registrationStatusDto.setSubStatusCode(StatusUtil.PACKET_STRUCTURAL_VALIDATION_SUCCESS.getCode());
 					registrationStatusDto.setStatusCode(RegistrationStatusCode.PROCESSING.toString());
 					// ReverseDataSync (reuse metaInfo to avoid second getMetaInfo call)
+					long t4 = System.currentTimeMillis();
 					reverseDataSync(registrationId, registrationStatusDto.getRegistrationType(), description,
 							packetValidationDto, metaInfo);
+					regProcLogger.info("PERF_packetvalidator_reverseDataSync took {} ms for rid: {}", (System.currentTimeMillis() - t4), registrationId);
 
 					packetValidationDto.setTransactionSuccessful(true);
 					description.setMessage(
@@ -452,7 +470,10 @@ public class PacketValidateProcessor {
 					? PlatformSuccessMessages.RPR_PKR_PACKET_VALIDATE.getCode()
 					: description.getCode();
 			String moduleName = ModuleName.PACKET_VALIDATOR.toString();
+			long tUpdate = System.currentTimeMillis();
 			registrationStatusService.updateRegistrationStatus(registrationStatusDto, moduleId, moduleName);
+			regProcLogger.info("PERF_packetvalidator_updateRegistrationStatus took {} ms for rid: {}", (System.currentTimeMillis() - tUpdate), registrationId);
+			regProcLogger.info("PERF_packetvalidator_process END - total time {} ms for rid: {}", (System.currentTimeMillis() - processStart), registrationId);
 			if (packetValidationDto.isTransactionSuccessful())
 				description.setMessage(PlatformSuccessMessages.RPR_PKR_PACKET_VALIDATE.getMessage());
 			String eventId = packetValidationDto.isTransactionSuccessful() ? EventId.RPR_402.toString()
