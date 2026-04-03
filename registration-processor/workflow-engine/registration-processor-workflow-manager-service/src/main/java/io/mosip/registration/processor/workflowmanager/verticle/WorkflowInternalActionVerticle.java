@@ -8,6 +8,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 
 import io.mosip.kernel.core.util.DateUtils2;
 import io.mosip.registration.processor.core.util.JsonUtil;
@@ -256,34 +258,115 @@ public class WorkflowInternalActionVerticle extends MosipVerticleAPIManager {
 	private void processAnonymousProfile(WorkflowInternalActionDTO workflowInternalActionDTO)
 			throws IOException, JSONException, BaseCheckedException {
 
-		String json = null;
 		String registrationId = workflowInternalActionDTO.getRid();
 		String registrationType = workflowInternalActionDTO.getReg_type();
 
 		regProcLogger.info("processAnonymousProfile called for registration id {}", registrationId);
 
-		InternalRegistrationStatusDto registrationStatusDto = registrationStatusService.getRegistrationStatus(
-				registrationId, registrationType, workflowInternalActionDTO.getIteration(),
-				workflowInternalActionDTO.getWorkflowInstanceId());
-		JSONObject regProcessorIdentityJson = utility.getRegistrationProcessorMappingJson(MappingJsonConstants.IDENTITY);
-		String idSchemaVersionValue = JsonUtil.getJSONValue(JsonUtil.getJSONObject(regProcessorIdentityJson, MappingJsonConstants.IDSCHEMA_VERSION), MappingJsonConstants.VALUE);
-		String schemaVersion = priorityBasedpacketManagerService.getFieldByMappingJsonKey(registrationId,
-				idSchemaVersionValue, registrationType, ProviderStageName.WORKFLOW_MANAGER);
-		Map<String,String> fieldTypeMap = idSchemaUtil.getIdSchemaFieldTypes(
-				Double.parseDouble(schemaVersion));
-		Map<String, String> fieldMap = priorityBasedpacketManagerService.getFields(registrationId,
-				idSchemaUtil.getDefaultFields(Double.valueOf(schemaVersion)), registrationType,
-				ProviderStageName.WORKFLOW_MANAGER);
-		Map<String, String> metaInfoMap = priorityBasedpacketManagerService.getMetaInfo(registrationId,
-				registrationType,
-				ProviderStageName.WORKFLOW_MANAGER);
-		BiometricRecord biometricRecord = priorityBasedpacketManagerService.getBiometrics(registrationId,
-				MappingJsonConstants.INDIVIDUAL_BIOMETRICS, registrationType, ProviderStageName.WORKFLOW_MANAGER);
-		json = anonymousProfileService.buildJsonStringFromPacketInfo(biometricRecord, fieldMap, fieldTypeMap,
-				metaInfoMap, registrationStatusDto.getStatusCode(), registrationStatusDto.getRegistrationStageName());
-		anonymousProfileService.saveAnonymousProfile(registrationId, registrationStatusDto.getRegistrationStageName(), json);
-		
-		this.send(this.mosipEventBus, new MessageBusAddress(anonymousProfileBusAddress), workflowInternalActionDTO);
+		try {
+			// Round 1: fire all independent calls in parallel
+			CompletableFuture<InternalRegistrationStatusDto> registrationStatusFuture =
+					CompletableFuture.supplyAsync(() -> {
+						try {
+							return registrationStatusService.getRegistrationStatus(
+									registrationId, registrationType,
+									workflowInternalActionDTO.getIteration(),
+									workflowInternalActionDTO.getWorkflowInstanceId());
+						} catch (Exception e) {
+							throw new RuntimeException(e);
+						}
+					});
+
+			CompletableFuture<Map<String, String>> metaInfoFuture =
+					CompletableFuture.supplyAsync(() -> {
+						try {
+							return priorityBasedpacketManagerService.getMetaInfo(
+									registrationId, registrationType, ProviderStageName.WORKFLOW_MANAGER);
+						} catch (Exception e) {
+							throw new RuntimeException(e);
+						}
+					});
+
+			CompletableFuture<BiometricRecord> biometricsFuture =
+					CompletableFuture.supplyAsync(() -> {
+						try {
+							return priorityBasedpacketManagerService.getBiometrics(
+									registrationId, MappingJsonConstants.INDIVIDUAL_BIOMETRICS,
+									registrationType, ProviderStageName.WORKFLOW_MANAGER);
+						} catch (Exception e) {
+							throw new RuntimeException(e);
+						}
+					});
+
+			// Chain: mappingJson -> idSchemaVersionValue -> schemaVersion (sequential dependencies)
+			CompletableFuture<String> schemaVersionFuture =
+					CompletableFuture.supplyAsync(() -> {
+						try {
+							JSONObject regProcessorIdentityJson =
+									utility.getRegistrationProcessorMappingJson(MappingJsonConstants.IDENTITY);
+							String idSchemaVersionValue = JsonUtil.getJSONValue(
+									JsonUtil.getJSONObject(regProcessorIdentityJson, MappingJsonConstants.IDSCHEMA_VERSION),
+									MappingJsonConstants.VALUE);
+							return priorityBasedpacketManagerService.getFieldByMappingJsonKey(
+									registrationId, idSchemaVersionValue, registrationType,
+									ProviderStageName.WORKFLOW_MANAGER);
+						} catch (Exception e) {
+							throw new RuntimeException(e);
+						}
+					});
+
+			// Round 2: once schemaVersion is known, fire fieldTypeMap and fieldMap in parallel
+			CompletableFuture<Map<String, String>> fieldTypeMapFuture =
+					schemaVersionFuture.thenApplyAsync(schemaVersion -> {
+						try {
+							return idSchemaUtil.getIdSchemaFieldTypes(Double.parseDouble(schemaVersion));
+						} catch (Exception e) {
+							throw new RuntimeException(e);
+						}
+					});
+
+			CompletableFuture<Map<String, String>> fieldMapFuture =
+					schemaVersionFuture.thenApplyAsync(schemaVersion -> {
+						try {
+							return priorityBasedpacketManagerService.getFields(
+									registrationId,
+									idSchemaUtil.getDefaultFields(Double.valueOf(schemaVersion)),
+									registrationType, ProviderStageName.WORKFLOW_MANAGER);
+						} catch (Exception e) {
+							throw new RuntimeException(e);
+						}
+					});
+
+			// Collect all results
+			InternalRegistrationStatusDto registrationStatusDto = registrationStatusFuture.get();
+			Map<String, String> metaInfoMap = metaInfoFuture.get();
+			BiometricRecord biometricRecord = biometricsFuture.get();
+			Map<String, String> fieldTypeMap = fieldTypeMapFuture.get();
+			Map<String, String> fieldMap = fieldMapFuture.get();
+
+			String json = anonymousProfileService.buildJsonStringFromPacketInfo(
+					biometricRecord, fieldMap, fieldTypeMap,
+					metaInfoMap, registrationStatusDto.getStatusCode(),
+					registrationStatusDto.getRegistrationStageName());
+			anonymousProfileService.saveAnonymousProfile(
+					registrationId, registrationStatusDto.getRegistrationStageName(), json);
+
+			this.send(this.mosipEventBus, new MessageBusAddress(anonymousProfileBusAddress), workflowInternalActionDTO);
+
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new BaseCheckedException(
+					PlatformErrorMessages.RPR_WORKFLOW_INTERNAL_ACTION_FAILED.getCode(),
+					"Thread interrupted during anonymous profile processing", e);
+		} catch (ExecutionException e) {
+			Throwable cause = e.getCause() != null ? e.getCause() : e;
+			if (cause instanceof IOException) throw (IOException) cause;
+			if (cause instanceof JSONException) throw (JSONException) cause;
+			if (cause instanceof BaseCheckedException) throw (BaseCheckedException) cause;
+			throw new BaseCheckedException(
+					PlatformErrorMessages.RPR_WORKFLOW_INTERNAL_ACTION_FAILED.getCode(),
+					"Error during anonymous profile processing: " + cause.getMessage(), cause);
+		}
 
 		regProcLogger.info("processAnonymousProfile ended for registration id {}", registrationId);
 	}
