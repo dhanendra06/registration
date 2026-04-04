@@ -17,6 +17,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executors;
 import io.mosip.registration.processor.core.exception.PacketManagerNonRecoverableException;
 import org.apache.commons.io.IOUtils;
 import org.json.simple.JSONObject;
@@ -138,13 +139,13 @@ public class QualityClassifierStageTest {
 
 				@Override
 				public void consume(MessageBusAddress fromAddress,
-						EventHandler<EventDTO, Handler<AsyncResult<MessageDTO>>> eventHandler) {
+									EventHandler<EventDTO, Handler<AsyncResult<MessageDTO>>> eventHandler) {
 
 				}
 
 				@Override
 				public void consumeAndSend(MessageBusAddress fromAddress, MessageBusAddress toAddress,
-						EventHandler<EventDTO, Handler<AsyncResult<MessageDTO>>> eventHandler) {
+										   EventHandler<EventDTO, Handler<AsyncResult<MessageDTO>>> eventHandler) {
 
 				}
 
@@ -174,7 +175,7 @@ public class QualityClassifierStageTest {
 
 		@Override
 		public void consumeAndSend(MosipEventBus mosipEventBus, MessageBusAddress fromAddress,
-				MessageBusAddress toAddress, long messageExpiryTimeLimit) {
+								   MessageBusAddress toAddress, long messageExpiryTimeLimit) {
 		}
 	};
 
@@ -216,6 +217,7 @@ public class QualityClassifierStageTest {
 
 
 		ReflectionTestUtils.setField(qualityClassifierStage, "parsedQualityRangeMap", parsedMap);
+		ReflectionTestUtils.setField(qualityClassifierStage, "qualityExecutor", Executors.newFixedThreadPool(5));
 		ReflectionTestUtils.setField(qualityClassifierStage, "modalities", Arrays.asList("Iris", "Finger", "Face"));
 
 		registrationStatusDto = new InternalRegistrationStatusDto();
@@ -374,7 +376,7 @@ public class QualityClassifierStageTest {
 	}
 
 	private void assertQualityTags(Map<String, String> qualityTags, String irisClassification,
-			String fingerClassification, String faceClassification) {
+								   String fingerClassification, String faceClassification) {
 
 		assertTrue(qualityTags.get(qualityPrefixTag + BiometricType.FACE.value()).equalsIgnoreCase(faceClassification));
 		assertTrue(qualityTags.get(qualityPrefixTag + BiometricType.FINGER.value())
@@ -464,7 +466,7 @@ public class QualityClassifierStageTest {
 		when(basedPacketManagerService.getBiometricsByMappingJsonKey(any(), any(), any(), any()))
 				.thenThrow(new PacketManagerException("code", "message"));
 		Mockito.when(registrationStatusMapperUtil.getStatusCode(RegistrationExceptionTypeCode.PACKET_MANAGER_EXCEPTION))
-		.thenReturn("REPROCESS");
+				.thenReturn("REPROCESS");
 		MessageDTO dto = new MessageDTO();
 		dto.setRid("1234567890");
 		MessageDTO messageDTO = qualityClassifierStage.process(dto);
@@ -478,7 +480,7 @@ public class QualityClassifierStageTest {
 		when(basedPacketManagerService.getBiometricsByMappingJsonKey(any(), any(), any(), any()))
 				.thenThrow(new IOException("message"));
 		Mockito.when(registrationStatusMapperUtil.getStatusCode(RegistrationExceptionTypeCode.IOEXCEPTION))
-		.thenReturn("ERROR");
+				.thenReturn("ERROR");
 		MessageDTO dto = new MessageDTO();
 		dto.setRid("1234567890");
 		MessageDTO messageDTO = qualityClassifierStage.process(dto);
@@ -492,7 +494,7 @@ public class QualityClassifierStageTest {
 		when(basedPacketManagerService.getBiometricsByMappingJsonKey(any(), any(), any(), any()))
 				.thenThrow(new ApisResourceAccessException("message"));
 		Mockito.when(registrationStatusMapperUtil.getStatusCode(RegistrationExceptionTypeCode.APIS_RESOURCE_ACCESS_EXCEPTION))
-		.thenReturn("REPROCESS");
+				.thenReturn("REPROCESS");
 		MessageDTO dto = new MessageDTO();
 		dto.setRid("1234567890");
 		MessageDTO messageDTO = qualityClassifierStage.process(dto);
@@ -507,7 +509,7 @@ public class QualityClassifierStageTest {
 		when(basedPacketManagerService.getBiometricsByMappingJsonKey(any(), any(), any(), any())).thenReturn(null)
 				.thenReturn(null);
 		when(registrationStatusMapperUtil.getStatusCode(RegistrationExceptionTypeCode.BIOMETRIC_EXCEPTION))
-		.thenReturn("REPROCESS");
+				.thenReturn("REPROCESS");
 		MessageDTO dto = new MessageDTO();
 		dto.setRid("1234567890");
 		MessageDTO result = qualityClassifierStage.process(dto);
@@ -521,7 +523,7 @@ public class QualityClassifierStageTest {
 		Mockito.when(bioApiFactory.getBioProvider(any(), any()))
 				.thenThrow(new BiometricException("", "error from provider"));
 		Mockito.when(registrationStatusMapperUtil.getStatusCode(RegistrationExceptionTypeCode.BIOMETRIC_EXCEPTION))
-		.thenReturn("REPROCESS");
+				.thenReturn("REPROCESS");
 		MessageDTO dto = new MessageDTO();
 		dto.setRid("1234567890");
 		MessageDTO result = qualityClassifierStage.process(dto);
@@ -534,7 +536,7 @@ public class QualityClassifierStageTest {
 	public void testQualityCheckfailureException() throws BiometricException {
 		Mockito.when(bioApiFactory.getBioProvider(any(), any())).thenReturn(null);
 		when(registrationStatusMapperUtil.getStatusCode(RegistrationExceptionTypeCode.EXCEPTION))
-		.thenReturn("ERROR");
+				.thenReturn("ERROR");
 		MessageDTO dto = new MessageDTO();
 		dto.setRid("1234567890");
 		MessageDTO result = qualityClassifierStage.process(dto);
@@ -550,7 +552,7 @@ public class QualityClassifierStageTest {
 		when(basedPacketManagerService.getBiometricsByMappingJsonKey(anyString(), any(), any(), any()))
 				.thenReturn(null);
 		when(registrationStatusMapperUtil.getStatusCode(RegistrationExceptionTypeCode.BIOMETRIC_EXCEPTION))
-		.thenReturn("REPROCESS");
+				.thenReturn("REPROCESS");
 		MessageDTO dto = new MessageDTO();
 		dto.setRid("1234567890");
 		MessageDTO result = qualityClassifierStage.process(dto);
@@ -579,7 +581,7 @@ public class QualityClassifierStageTest {
 
 		when(basedPacketManagerService.getBiometricsByMappingJsonKey(any(), any(), any(), any())).thenReturn(null);
 		when(registrationStatusMapperUtil.getStatusCode(RegistrationExceptionTypeCode.BIOMETRIC_EXCEPTION))
-		.thenReturn("REPROCESS");
+				.thenReturn("REPROCESS");
 		MessageDTO dto = new MessageDTO();
 		dto.setRid("1234567890");
 		MessageDTO result = qualityClassifierStage.process(dto);
@@ -594,7 +596,7 @@ public class QualityClassifierStageTest {
 				.thenThrow(new JsonProcessingException("Json exception"));
 		Mockito.when(registrationStatusService.getRegistrationStatus(anyString(), any(), any(), any())).thenReturn(registrationStatusDto);
 		when(registrationStatusMapperUtil.getStatusCode(RegistrationExceptionTypeCode.JSON_PROCESSING_EXCEPTION))
-		.thenReturn("ERROR");
+				.thenReturn("ERROR");
 		MessageDTO dto = new MessageDTO();
 		dto.setRid("1234567890");
 		MessageDTO result = qualityClassifierStage.process(dto);
