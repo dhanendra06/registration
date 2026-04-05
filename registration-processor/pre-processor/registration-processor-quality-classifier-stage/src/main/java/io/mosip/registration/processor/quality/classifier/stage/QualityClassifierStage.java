@@ -164,6 +164,9 @@ public class QualityClassifierStage extends MosipVerticleAPIManager {
 	/** Cache of bio provider instances per BiometricType — getBioProvider() called once per type, not per BIR */
 	private final Map<BiometricType, iBioProviderApi> bioProviderCache = new ConcurrentHashMap<>();
 
+	/** Shared virtual-thread executor — initialized once, reused across all records and both call sites */
+	private final ExecutorService virtualThreadExecutor = Executors.newVirtualThreadPerTaskExecutor();
+
 	/** The reg proc logger. */
 	private static Logger regProcLogger = RegProcessorLogger.getLogger(QualityClassifierStage.class);
 
@@ -232,8 +235,9 @@ public class QualityClassifierStage extends MosipVerticleAPIManager {
 				object.getReg_type(), object.getIteration(), object.getWorkflowInstanceId());
 
 		try {
-			// Fire getBiometricsByMappingJsonKey in parallel with getFieldByMappingJsonKey — both hit packet manager
-			// For the common case (biometrics present) this saves one sequential HTTP round-trip
+			// Fire getBiometricsByMappingJsonKey via a virtual thread in parallel with the blocking
+			// getFieldByMappingJsonKey call on the worker thread — saves one sequential HTTP round-trip.
+			// Uses the shared virtualThreadExecutor (not ForkJoinPool.commonPool) to avoid queuing under load.
 			CompletableFuture<BiometricRecord> biometricFuture = CompletableFuture.supplyAsync(() -> {
 				try {
 					return basedPacketManagerService.getBiometricsByMappingJsonKey(regId,
@@ -242,7 +246,7 @@ public class QualityClassifierStage extends MosipVerticleAPIManager {
 				} catch (Exception e) {
 					throw new CompletionException(e);
 				}
-			});
+			}, virtualThreadExecutor);
 
 			String individualBiometricsObject = basedPacketManagerService.getFieldByMappingJsonKey(regId,
 					MappingJsonConstants.INDIVIDUAL_BIOMETRICS, registrationStatusDto.getRegistrationType(),
@@ -459,12 +463,8 @@ public class QualityClassifierStage extends MosipVerticleAPIManager {
 
 		ConcurrentHashMap<String, List<Float>> bioTypeScoreMap = new ConcurrentHashMap<>();
 
-		// Use virtual threads to run bio SDK quality checks in parallel.
-		// Virtual threads are ideal here because bio SDK calls are typically I/O-bound (HTTP to biometric service).
-		// Previously ForkJoinPool.submit().join() blocked the Vert.x worker thread; virtual threads avoid that.
-		ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
-		try {
-			List<CompletableFuture<Void>> futures = birs.stream()
+		// Use the shared virtualThreadExecutor — avoids creating/destroying an executor per record.
+		List<CompletableFuture<Void>> futures = birs.stream()
 					.filter(bir -> {
 						if (bir.getOthers() != null) {
 							for (Map.Entry<String, String> other : bir.getOthers().entrySet()) {
@@ -486,22 +486,19 @@ public class QualityClassifierStage extends MosipVerticleAPIManager {
 						} catch (BiometricException e) {
 							throw new CompletionException(e);
 						}
-					}, executor))
+					}, virtualThreadExecutor))
 					.collect(Collectors.toList());
 
-			try {
-				CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-			} catch (CompletionException e) {
-				Throwable cause = e.getCause();
-				while (cause instanceof CompletionException && cause.getCause() != null)
-					cause = cause.getCause();
-				regProcLogger.error(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
-						regId, "BiometricException occurred : " + ExceptionUtils.getStackTrace(cause));
-				if (cause instanceof BiometricException) throw (BiometricException) cause;
-				throw new RuntimeException("Exception occurred in getQualityTags()", cause);
-			}
-		} finally {
-			executor.close();
+		try {
+			CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+		} catch (CompletionException e) {
+			Throwable cause = e.getCause();
+			while (cause instanceof CompletionException && cause.getCause() != null)
+				cause = cause.getCause();
+			regProcLogger.error(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+					regId, "BiometricException occurred : " + ExceptionUtils.getStackTrace(cause));
+			if (cause instanceof BiometricException) throw (BiometricException) cause;
+			throw new RuntimeException("Exception occurred in getQualityTags()", cause);
 		}
 
 		// Compute minimum score per modality, then map to quality range tag
