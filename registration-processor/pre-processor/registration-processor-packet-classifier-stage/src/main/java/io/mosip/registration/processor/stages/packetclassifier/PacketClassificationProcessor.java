@@ -70,30 +70,31 @@ import io.mosip.registration.processor.status.service.RegistrationStatusService;
  * @author Vishwanath V
  */
 @Service
+@Transactional
 public class PacketClassificationProcessor {
 
 	/**
 	 * The reg proc logger.
 	 */
-	private static Logger regProcLogger = 
-		RegProcessorLogger.getLogger(PacketClassificationProcessor.class);
+	private static Logger regProcLogger =
+			RegProcessorLogger.getLogger(PacketClassificationProcessor.class);
 
 	/**
 	 * The Constant USER.
 	 */
 	private static final String USER = "MOSIP_SYSTEM";
 
-    private static final String VALUE = "value";
+	private static final String VALUE = "value";
 
 	/*
-     * java class to trim exception message
-     */
+	 * java class to trim exception message
+	 */
 	private TrimExceptionMessage trimExpMessage = new TrimExceptionMessage();
 
 	/** The tag value that will be used by default when the packet does not have value for the tag field */
 	@Value("${mosip.regproc.packet.classifier.tagging.not-available-tag-value}")
 	private String notAvailableTagValue;
-	
+
 	/**
 	 * The packet manager service that will invoked for all the packet related activities
 	 */
@@ -107,8 +108,8 @@ public class PacketClassificationProcessor {
 	 * The registration status service.
 	 */
 	@Autowired
-	RegistrationStatusService<String, InternalRegistrationStatusDto, 
-		RegistrationStatusDto> registrationStatusService;
+	RegistrationStatusService<String, InternalRegistrationStatusDto,
+			RegistrationStatusDto> registrationStatusService;
 
 	/**
 	 * The core audit request builder.
@@ -126,7 +127,7 @@ public class PacketClassificationProcessor {
 	 * Frequently used util methods are available in this bean
 	 */
 	@Autowired
-    private Utilities utility;
+	private Utilities utility;
 
 	/**
 	 * Holds all the util methods to deal with Id schema
@@ -134,13 +135,13 @@ public class PacketClassificationProcessor {
 	@Autowired
 	private IdSchemaUtil idSchemaUtil;
 
-	/** 
+	/**
 	 * This List will contain all the tag generators that is applicable as per the configuration 
 	 */
 	@Autowired
 	private List<TagGenerator> tagGenerators;
 
-	/** 
+	/**
 	 * Id object fields required by all the configured tag generators will be maintained here
 	 */
 	private List<String> requiredIdObjectFieldNames;
@@ -150,7 +151,7 @@ public class PacketClassificationProcessor {
 	/**
 	 * Once this bean is initialized and all properties are set, each configured tag
 	 * generator is invoked to collect all the required Id object field names
-	 * 
+	 *
 	 * @throws IOException
 	 */
 	@PostConstruct
@@ -161,7 +162,7 @@ public class PacketClassificationProcessor {
 			org.json.simple.JSONObject identityMappingJson = utility.getRegistrationProcessorMappingJson(
 					MappingJsonConstants.IDENTITY);
 			idSchemaVersionLabel = JsonUtil.getJSONValue(
-				JsonUtil.getJSONObject(identityMappingJson, MappingJsonConstants.IDSCHEMA_VERSION), VALUE);
+					JsonUtil.getJSONObject(identityMappingJson, MappingJsonConstants.IDSCHEMA_VERSION), VALUE);
 			requiredIdObjectFieldNames.add(idSchemaVersionLabel);
 			for(TagGenerator tagGenerator : tagGenerators) {
 				regProcLogger.info("TagGenerator enabled : {}", tagGenerator.getClass().toString());
@@ -171,18 +172,18 @@ public class PacketClassificationProcessor {
 					requiredIdObjectFieldNames.addAll(idFieldNames);
 			}
 		} catch (BaseCheckedException e) {
-			regProcLogger.error(LoggerFileConstant.SESSIONID.toString(), 
-				LoggerFileConstant.REGISTRATIONID.toString(),
-				PlatformErrorMessages.RPR_PCM_COLLECT_IDOBJECT_FIELD_FAILED.getCode(),
-				PlatformErrorMessages.RPR_PCM_COLLECT_IDOBJECT_FIELD_FAILED.getMessage() 
-					+ e.getMessage() + ExceptionUtils.getStackTrace(e));
+			regProcLogger.error(LoggerFileConstant.SESSIONID.toString(),
+					LoggerFileConstant.REGISTRATIONID.toString(),
+					PlatformErrorMessages.RPR_PCM_COLLECT_IDOBJECT_FIELD_FAILED.getCode(),
+					PlatformErrorMessages.RPR_PCM_COLLECT_IDOBJECT_FIELD_FAILED.getMessage()
+							+ e.getMessage() + ExceptionUtils.getStackTrace(e));
 			throw e;
 		} catch (IOException e) {
-			regProcLogger.error(LoggerFileConstant.SESSIONID.toString(), 
-				LoggerFileConstant.REGISTRATIONID.toString(),
-				PlatformErrorMessages.RPR_PCM_ACCESSING_IDOBJECT_MAPPING_FILE_FAILED.getCode(),
-				PlatformErrorMessages.RPR_PCM_ACCESSING_IDOBJECT_MAPPING_FILE_FAILED.getMessage() 
-					+ e.getMessage() + ExceptionUtils.getStackTrace(e));
+			regProcLogger.error(LoggerFileConstant.SESSIONID.toString(),
+					LoggerFileConstant.REGISTRATIONID.toString(),
+					PlatformErrorMessages.RPR_PCM_ACCESSING_IDOBJECT_MAPPING_FILE_FAILED.getCode(),
+					PlatformErrorMessages.RPR_PCM_ACCESSING_IDOBJECT_MAPPING_FILE_FAILED.getMessage()
+							+ e.getMessage() + ExceptionUtils.getStackTrace(e));
 			throw e;
 		}
 	}
@@ -201,7 +202,7 @@ public class PacketClassificationProcessor {
 
 		InternalRegistrationStatusDto registrationStatusDto = new InternalRegistrationStatusDto();
 		registrationStatusDto.setLatestTransactionTypeCode(
-			RegistrationTransactionTypeCode.PACKET_CLASSIFICATION.toString());
+				RegistrationTransactionTypeCode.PACKET_CLASSIFICATION.toString());
 		registrationStatusDto.setRegistrationStageName(stageName);
 
 		try {
@@ -209,75 +210,75 @@ public class PacketClassificationProcessor {
 			object.setIsValid(Boolean.FALSE);
 			object.setInternalError(Boolean.TRUE);
 
-			regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(), 
-				LoggerFileConstant.REGISTRATIONID.toString(), "", 
-				"PacketClassificationProcessor::process()::entry");
+			regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(),
+					LoggerFileConstant.REGISTRATIONID.toString(), "",
+					"PacketClassificationProcessor::process()::entry");
 			registrationId = object.getRid();
 
 			registrationStatusDto = registrationStatusService.getRegistrationStatus(
 					registrationId, object.getReg_type(), object.getIteration(), object.getWorkflowInstanceId());
 			registrationStatusDto.setLatestTransactionTypeCode(
-						RegistrationTransactionTypeCode.PACKET_CLASSIFICATION.toString());
+					RegistrationTransactionTypeCode.PACKET_CLASSIFICATION.toString());
 			registrationStatusDto.setRegistrationStageName(stageName);
 
-			generateAndAddTags(registrationStatusDto.getWorkflowInstanceId(), registrationId, 
-				registrationStatusDto.getRegistrationType(), object.getIteration());
+			generateAndAddTags(registrationStatusDto.getWorkflowInstanceId(), registrationId,
+					registrationStatusDto.getRegistrationType(), object.getIteration());
 			object.setTags(null);
 
 			registrationStatusDto.setLatestTransactionStatusCode(
-				RegistrationTransactionStatusCode.SUCCESS.toString());
+					RegistrationTransactionStatusCode.SUCCESS.toString());
 			registrationStatusDto.setStatusComment(
-				StatusUtil.PACKET_CLASSIFICATION_SUCCESS.getMessage());
+					StatusUtil.PACKET_CLASSIFICATION_SUCCESS.getMessage());
 			registrationStatusDto.setSubStatusCode(StatusUtil.PACKET_CLASSIFICATION_SUCCESS.getCode());
 			registrationStatusDto.setStatusCode(RegistrationStatusCode.PROCESSING.toString());
 
 			description.setMessage(
-				PlatformSuccessMessages.RPR_PKR_PACKET_CLASSIFIER.getMessage() + " -- " + registrationId);
+					PlatformSuccessMessages.RPR_PKR_PACKET_CLASSIFIER.getMessage() + " -- " + registrationId);
 			description.setCode(PlatformSuccessMessages.RPR_PKR_PACKET_CLASSIFIER.getCode());
 
 			regProcLogger.info(LoggerFileConstant.SESSIONID.toString(),
-				LoggerFileConstant.REGISTRATIONID.toString(), registrationId,
-				description.getCode() + description.getMessage());
+					LoggerFileConstant.REGISTRATIONID.toString(), registrationId,
+					description.getCode() + description.getMessage());
 
 			object.setIsValid(Boolean.TRUE);
 			object.setInternalError(Boolean.FALSE);
 			isTransactionSuccessful = true;
 		} catch(PacketManagerNonRecoverableException e){
-            updateDTOsAndLogError(registrationStatusDto, RegistrationStatusCode.FAILED,
-                    StatusUtil.PACKET_MANAGER_NON_RECOVERABLE_EXCEPTION, RegistrationExceptionTypeCode.PACKET_MANAGER_NON_RECOVERABLE_EXCEPTION,
-                    description, PlatformErrorMessages.PACKET_MANAGER_NON_RECOVERABLE_EXCEPTION, e);
-        } catch (PacketManagerException e) {
-			updateDTOsAndLogError(registrationStatusDto, RegistrationStatusCode.PROCESSING, 
-				StatusUtil.PACKET_MANAGER_EXCEPTION, RegistrationExceptionTypeCode.PACKET_MANAGER_EXCEPTION, 
-				description, PlatformErrorMessages.PACKET_MANAGER_EXCEPTION, e);
+			updateDTOsAndLogError(registrationStatusDto, RegistrationStatusCode.FAILED,
+					StatusUtil.PACKET_MANAGER_NON_RECOVERABLE_EXCEPTION, RegistrationExceptionTypeCode.PACKET_MANAGER_NON_RECOVERABLE_EXCEPTION,
+					description, PlatformErrorMessages.PACKET_MANAGER_NON_RECOVERABLE_EXCEPTION, e);
+		} catch (PacketManagerException e) {
+			updateDTOsAndLogError(registrationStatusDto, RegistrationStatusCode.PROCESSING,
+					StatusUtil.PACKET_MANAGER_EXCEPTION, RegistrationExceptionTypeCode.PACKET_MANAGER_EXCEPTION,
+					description, PlatformErrorMessages.PACKET_MANAGER_EXCEPTION, e);
 		} catch (DataAccessException e) {
-			updateDTOsAndLogError(registrationStatusDto, RegistrationStatusCode.PROCESSING, 
-				StatusUtil.DB_NOT_ACCESSIBLE, RegistrationExceptionTypeCode.DATA_ACCESS_EXCEPTION, 
-				description, PlatformErrorMessages.RPR_RGS_REGISTRATION_TABLE_NOT_ACCESSIBLE, e);
+			updateDTOsAndLogError(registrationStatusDto, RegistrationStatusCode.PROCESSING,
+					StatusUtil.DB_NOT_ACCESSIBLE, RegistrationExceptionTypeCode.DATA_ACCESS_EXCEPTION,
+					description, PlatformErrorMessages.RPR_RGS_REGISTRATION_TABLE_NOT_ACCESSIBLE, e);
 		} catch (IOException e) {
-			updateDTOsAndLogError(registrationStatusDto, RegistrationStatusCode.FAILED, 
-				StatusUtil.IO_EXCEPTION, RegistrationExceptionTypeCode.IOEXCEPTION, 
-				description, PlatformErrorMessages.RPR_SYS_IO_EXCEPTION, e);
+			updateDTOsAndLogError(registrationStatusDto, RegistrationStatusCode.FAILED,
+					StatusUtil.IO_EXCEPTION, RegistrationExceptionTypeCode.IOEXCEPTION,
+					description, PlatformErrorMessages.RPR_SYS_IO_EXCEPTION, e);
 		} catch (ParsingException | JsonProcessingException e) {
-			updateDTOsAndLogError(registrationStatusDto, RegistrationStatusCode.FAILED, 
-				StatusUtil.JSON_PARSING_EXCEPTION, RegistrationExceptionTypeCode.PARSE_EXCEPTION, 
-				description, PlatformErrorMessages.RPR_SYS_JSON_PARSING_EXCEPTION, e);
+			updateDTOsAndLogError(registrationStatusDto, RegistrationStatusCode.FAILED,
+					StatusUtil.JSON_PARSING_EXCEPTION, RegistrationExceptionTypeCode.PARSE_EXCEPTION,
+					description, PlatformErrorMessages.RPR_SYS_JSON_PARSING_EXCEPTION, e);
 		} catch (TablenotAccessibleException e) {
-			updateDTOsAndLogError(registrationStatusDto, RegistrationStatusCode.PROCESSING, 
-				StatusUtil.DB_NOT_ACCESSIBLE, RegistrationExceptionTypeCode.TABLE_NOT_ACCESSIBLE_EXCEPTION, 
-				description, PlatformErrorMessages.RPR_RGS_REGISTRATION_TABLE_NOT_ACCESSIBLE, e);
+			updateDTOsAndLogError(registrationStatusDto, RegistrationStatusCode.PROCESSING,
+					StatusUtil.DB_NOT_ACCESSIBLE, RegistrationExceptionTypeCode.TABLE_NOT_ACCESSIBLE_EXCEPTION,
+					description, PlatformErrorMessages.RPR_RGS_REGISTRATION_TABLE_NOT_ACCESSIBLE, e);
 		} catch (BaseUncheckedException e) {
-			updateDTOsAndLogError(registrationStatusDto, RegistrationStatusCode.FAILED, 
-				StatusUtil.BASE_UNCHECKED_EXCEPTION, RegistrationExceptionTypeCode.BASE_UNCHECKED_EXCEPTION, 
-				description, PlatformErrorMessages.RPR_PCM_BASE_UNCHECKED_EXCEPTION, e);
+			updateDTOsAndLogError(registrationStatusDto, RegistrationStatusCode.FAILED,
+					StatusUtil.BASE_UNCHECKED_EXCEPTION, RegistrationExceptionTypeCode.BASE_UNCHECKED_EXCEPTION,
+					description, PlatformErrorMessages.RPR_PCM_BASE_UNCHECKED_EXCEPTION, e);
 		} catch (BaseCheckedException e) {
-			updateDTOsAndLogError(registrationStatusDto, RegistrationStatusCode.FAILED, 
-				StatusUtil.BASE_CHECKED_EXCEPTION, RegistrationExceptionTypeCode.BASE_CHECKED_EXCEPTION, 
-				description, PlatformErrorMessages.RPR_PCM_BASE_CHECKED_EXCEPTION, e);
+			updateDTOsAndLogError(registrationStatusDto, RegistrationStatusCode.FAILED,
+					StatusUtil.BASE_CHECKED_EXCEPTION, RegistrationExceptionTypeCode.BASE_CHECKED_EXCEPTION,
+					description, PlatformErrorMessages.RPR_PCM_BASE_CHECKED_EXCEPTION, e);
 		} catch (Exception e) {
-			updateDTOsAndLogError(registrationStatusDto, RegistrationStatusCode.FAILED, 
-				StatusUtil.UNKNOWN_EXCEPTION_OCCURED, RegistrationExceptionTypeCode.EXCEPTION, 
-				description, PlatformErrorMessages.PACKET_CLASSIFICATION_FAILED, e);
+			updateDTOsAndLogError(registrationStatusDto, RegistrationStatusCode.FAILED,
+					StatusUtil.UNKNOWN_EXCEPTION_OCCURED, RegistrationExceptionTypeCode.EXCEPTION,
+					description, PlatformErrorMessages.PACKET_CLASSIFICATION_FAILED, e);
 		} finally {
 			if (object.getInternalError()) {
 				int retryCount = registrationStatusDto.getRetryCount() != null
@@ -297,10 +298,10 @@ public class PacketClassificationProcessor {
 		return object;
 	}
 
-	private void updateDTOsAndLogError(InternalRegistrationStatusDto registrationStatusDto, 
-			RegistrationStatusCode registrationStatusCode, StatusUtil statusUtil, 
-			RegistrationExceptionTypeCode registrationExceptionTypeCode, LogDescription description, 
-			PlatformErrorMessages platformErrorMessages, Exception e) {
+	private void updateDTOsAndLogError(InternalRegistrationStatusDto registrationStatusDto,
+									   RegistrationStatusCode registrationStatusCode, StatusUtil statusUtil,
+									   RegistrationExceptionTypeCode registrationExceptionTypeCode, LogDescription description,
+									   PlatformErrorMessages platformErrorMessages, Exception e) {
 		registrationStatusDto.setStatusCode(registrationStatusCode.toString());
 		registrationStatusDto.setStatusComment(trimExpMessage
 				.trimExceptionMessage(statusUtil.getMessage() + e.getMessage()));
@@ -309,14 +310,14 @@ public class PacketClassificationProcessor {
 				registrationStatusMapperUtil.getStatusCode(registrationExceptionTypeCode));
 		description.setMessage(platformErrorMessages.getMessage());
 		description.setCode(platformErrorMessages.getCode());
-		regProcLogger.error(LoggerFileConstant.SESSIONID.toString(), 
-			LoggerFileConstant.REGISTRATIONID.toString(),
-			description.getCode() + " -- " + registrationStatusDto.getRegistrationId(),
-			platformErrorMessages.getMessage() + e.getMessage() + ExceptionUtils.getStackTrace(e));
+		regProcLogger.error(LoggerFileConstant.SESSIONID.toString(),
+				LoggerFileConstant.REGISTRATIONID.toString(),
+				description.getCode() + " -- " + registrationStatusDto.getRegistrationId(),
+				platformErrorMessages.getMessage() + e.getMessage() + ExceptionUtils.getStackTrace(e));
 	}
 
 	private void updateAudit(LogDescription description, boolean isTransactionSuccessful, String moduleId,
-			String moduleName, String registrationId) {
+							 String moduleName, String registrationId) {
 		String eventId = isTransactionSuccessful ? EventId.RPR_402.toString()
 				: EventId.RPR_405.toString();
 		String eventName = isTransactionSuccessful ? EventName.UPDATE.toString()
@@ -324,30 +325,46 @@ public class PacketClassificationProcessor {
 		String eventType = isTransactionSuccessful ? EventType.BUSINESS.toString()
 				: EventType.SYSTEM.toString();
 
-		auditLogRequestBuilder.createAuditRequestBuilder(description.getMessage(), eventId, eventName, 
-			eventType, moduleId, moduleName, registrationId);
+		auditLogRequestBuilder.createAuditRequestBuilder(description.getMessage(), eventId, eventName,
+				eventType, moduleId, moduleName, registrationId);
 	}
 
 	private void generateAndAddTags(String workflowInstanceId, String registrationId, String process, int iteration)
 			throws IOException, BaseCheckedException, NumberFormatException, JSONException {
-		regProcLogger.debug("generateAndAddTags called for registration id {} {}", registrationId, 
-			requiredIdObjectFieldNames);
+		regProcLogger.debug("generateAndAddTags called for registration id {} {}", registrationId,
+				requiredIdObjectFieldNames);
 
+		long stageStart = System.currentTimeMillis();
 		ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 		try {
 			// Fire getMetaInfo in parallel while processing identity fields — they are independent I/O calls
+			long metaInfoStart = System.currentTimeMillis();
 			CompletableFuture<Map<String, String>> metaInfoFuture = CompletableFuture.supplyAsync(() -> {
 				try {
-					return priorityBasedPacketManagerService.getMetaInfo(registrationId, process, ProviderStageName.CLASSIFICATION);
+					Map<String, String> result = priorityBasedPacketManagerService.getMetaInfo(registrationId, process, ProviderStageName.CLASSIFICATION);
+					regProcLogger.info("PERF [{}] getMetaInfo took {} ms", registrationId,
+							System.currentTimeMillis() - metaInfoStart);
+					return result;
 				} catch (Exception e) {
 					throw new CompletionException(e);
 				}
 			}, executor);
 
+			long getFieldsStart = System.currentTimeMillis();
 			Map<String, String> identityFieldValueMap = priorityBasedPacketManagerService.getFields(registrationId,
-				requiredIdObjectFieldNames, process, ProviderStageName.CLASSIFICATION);
+					requiredIdObjectFieldNames, process, ProviderStageName.CLASSIFICATION);
+			regProcLogger.info("PERF [{}] getFields took {} ms", registrationId,
+					System.currentTimeMillis() - getFieldsStart);
+
+			long fieldTypeMapStart = System.currentTimeMillis();
 			Map<String, String> fieldTypeMap = getFieldTypeMap(identityFieldValueMap.get(idSchemaVersionLabel));
+			regProcLogger.info("PERF [{}] getFieldTypeMap took {} ms", registrationId,
+					System.currentTimeMillis() - fieldTypeMapStart);
+
+			long idObjectMapStart = System.currentTimeMillis();
 			Map<String, FieldDTO> idObjectFieldDTOMap = getIdObjectFieldDTOMap(identityFieldValueMap, fieldTypeMap);
+			regProcLogger.info("PERF [{}] getIdObjectFieldDTOMap took {} ms", registrationId,
+					System.currentTimeMillis() - idObjectMapStart);
 
 			Map<String, String> metaInfoMap;
 			try {
@@ -364,12 +381,20 @@ public class PacketClassificationProcessor {
 			}
 
 			// Run tag generators in parallel — AgeGroupTagGenerator makes its own I/O call (getApplicantAge)
+			long tagGenStart = System.currentTimeMillis();
 			List<CompletableFuture<Map<String, String>>> tagFutures = tagGenerators.stream()
 					.map(tagGenerator -> CompletableFuture.supplyAsync(() -> {
+						long singleTagGenStart = System.currentTimeMillis();
+						String generatorName = tagGenerator.getClass().getSimpleName();
 						try {
-							return tagGenerator.generateTags(workflowInstanceId, registrationId, process,
+							Map<String, String> result = tagGenerator.generateTags(workflowInstanceId, registrationId, process,
 									idObjectFieldDTOMap, metaInfoMap, iteration);
+							regProcLogger.info("PERF [{}] tagGenerator [{}] took {} ms", registrationId,
+									generatorName, System.currentTimeMillis() - singleTagGenStart);
+							return result;
 						} catch (Exception e) {
+							regProcLogger.error("PERF [{}] tagGenerator [{}] failed after {} ms", registrationId,
+									generatorName, System.currentTimeMillis() - singleTagGenStart);
 							throw new CompletionException(e);
 						}
 					}, executor))
@@ -388,6 +413,8 @@ public class PacketClassificationProcessor {
 				if (cause instanceof RuntimeException) throw (RuntimeException) cause;
 				throw new IOException("Tag generation failed", cause);
 			}
+			regProcLogger.info("PERF [{}] all tagGenerators (parallel wall-time) took {} ms", registrationId,
+					System.currentTimeMillis() - tagGenStart);
 
 			Map<String, String> allTags = new HashMap<>();
 			for (CompletableFuture<Map<String, String>> future : tagFutures) {
@@ -398,15 +425,22 @@ public class PacketClassificationProcessor {
 
 			handleNullValueTags(allTags);
 			regProcLogger.debug("generated tags {}", new JSONObject(allTags).toString());
-			if (!allTags.isEmpty())
+			if (!allTags.isEmpty()) {
+				long addTagsStart = System.currentTimeMillis();
 				packetManagerService.addOrUpdateTags(registrationId, allTags);
+				regProcLogger.info("PERF [{}] addOrUpdateTags took {} ms", registrationId,
+						System.currentTimeMillis() - addTagsStart);
+			}
+
+			regProcLogger.info("PERF [{}] generateAndAddTags total took {} ms", registrationId,
+					System.currentTimeMillis() - stageStart);
 		} finally {
 			executor.close();
 		}
 	}
 
 	private Map<String, FieldDTO> getIdObjectFieldDTOMap(Map<String, String> identityFieldValueMap,
-			Map<String, String> fieldTypeMap ) {
+														 Map<String, String> fieldTypeMap ) {
 		Map<String, FieldDTO> idObjectFieldMap = new HashMap<>();
 		identityFieldValueMap.forEach((key,value) -> {
 			idObjectFieldMap.put(key, new FieldDTO(fieldTypeMap.get(key), value));
@@ -416,7 +450,7 @@ public class PacketClassificationProcessor {
 
 	private Map<String,String> getFieldTypeMap(String idSchemaVersion)
 			throws NumberFormatException, ApisResourceAccessException, JSONException, IOException {
-		
+
 		Map<String,String> fieldTypeMap = idSchemaUtil.getIdSchemaFieldTypes(
 				Double.parseDouble(idSchemaVersion));
 		regProcLogger.debug("getDefaultFields item {}", new JSONObject(fieldTypeMap).toString());
@@ -429,7 +463,7 @@ public class PacketClassificationProcessor {
 				entry.setValue(notAvailableTagValue);
 		}
 	}
-	
+
 	private void updateErrorFlags(InternalRegistrationStatusDto registrationStatusDto, MessageDTO object) {
 		object.setInternalError(true);
 		if (registrationStatusDto.getLatestTransactionStatusCode()
