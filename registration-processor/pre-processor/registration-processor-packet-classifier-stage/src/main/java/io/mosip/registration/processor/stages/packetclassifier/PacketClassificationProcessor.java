@@ -331,24 +331,40 @@ public class PacketClassificationProcessor {
 
 	private void generateAndAddTags(String workflowInstanceId, String registrationId, String process, int iteration)
 			throws IOException, BaseCheckedException, NumberFormatException, JSONException {
-		regProcLogger.debug("generateAndAddTags called for registration id {} {}", registrationId, 
+		regProcLogger.debug("generateAndAddTags called for registration id {} {}", registrationId,
 			requiredIdObjectFieldNames);
 
+		long stageStart = System.currentTimeMillis();
 		ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 		try {
 			// Fire getMetaInfo in parallel while processing identity fields — they are independent I/O calls
+			long metaInfoStart = System.currentTimeMillis();
 			CompletableFuture<Map<String, String>> metaInfoFuture = CompletableFuture.supplyAsync(() -> {
 				try {
-					return priorityBasedPacketManagerService.getMetaInfo(registrationId, process, ProviderStageName.CLASSIFICATION);
+					Map<String, String> result = priorityBasedPacketManagerService.getMetaInfo(registrationId, process, ProviderStageName.CLASSIFICATION);
+					regProcLogger.info("PERF [{}] getMetaInfo took {} ms", registrationId,
+							System.currentTimeMillis() - metaInfoStart);
+					return result;
 				} catch (Exception e) {
 					throw new CompletionException(e);
 				}
 			}, executor);
 
+			long getFieldsStart = System.currentTimeMillis();
 			Map<String, String> identityFieldValueMap = priorityBasedPacketManagerService.getFields(registrationId,
 				requiredIdObjectFieldNames, process, ProviderStageName.CLASSIFICATION);
+			regProcLogger.info("PERF [{}] getFields took {} ms", registrationId,
+					System.currentTimeMillis() - getFieldsStart);
+
+			long fieldTypeMapStart = System.currentTimeMillis();
 			Map<String, String> fieldTypeMap = getFieldTypeMap(identityFieldValueMap.get(idSchemaVersionLabel));
+			regProcLogger.info("PERF [{}] getFieldTypeMap took {} ms", registrationId,
+					System.currentTimeMillis() - fieldTypeMapStart);
+
+			long idObjectMapStart = System.currentTimeMillis();
 			Map<String, FieldDTO> idObjectFieldDTOMap = getIdObjectFieldDTOMap(identityFieldValueMap, fieldTypeMap);
+			regProcLogger.info("PERF [{}] getIdObjectFieldDTOMap took {} ms", registrationId,
+					System.currentTimeMillis() - idObjectMapStart);
 
 			Map<String, String> metaInfoMap;
 			try {
@@ -365,12 +381,20 @@ public class PacketClassificationProcessor {
 			}
 
 			// Run tag generators in parallel — AgeGroupTagGenerator makes its own I/O call (getApplicantAge)
+			long tagGenStart = System.currentTimeMillis();
 			List<CompletableFuture<Map<String, String>>> tagFutures = tagGenerators.stream()
 					.map(tagGenerator -> CompletableFuture.supplyAsync(() -> {
+						long singleTagGenStart = System.currentTimeMillis();
+						String generatorName = tagGenerator.getClass().getSimpleName();
 						try {
-							return tagGenerator.generateTags(workflowInstanceId, registrationId, process,
+							Map<String, String> result = tagGenerator.generateTags(workflowInstanceId, registrationId, process,
 									idObjectFieldDTOMap, metaInfoMap, iteration);
+							regProcLogger.info("PERF [{}] tagGenerator [{}] took {} ms", registrationId,
+									generatorName, System.currentTimeMillis() - singleTagGenStart);
+							return result;
 						} catch (Exception e) {
+							regProcLogger.error("PERF [{}] tagGenerator [{}] failed after {} ms", registrationId,
+									generatorName, System.currentTimeMillis() - singleTagGenStart);
 							throw new CompletionException(e);
 						}
 					}, executor))
@@ -389,6 +413,8 @@ public class PacketClassificationProcessor {
 				if (cause instanceof RuntimeException) throw (RuntimeException) cause;
 				throw new IOException("Tag generation failed", cause);
 			}
+			regProcLogger.info("PERF [{}] all tagGenerators (parallel wall-time) took {} ms", registrationId,
+					System.currentTimeMillis() - tagGenStart);
 
 			Map<String, String> allTags = new HashMap<>();
 			for (CompletableFuture<Map<String, String>> future : tagFutures) {
@@ -399,8 +425,15 @@ public class PacketClassificationProcessor {
 
 			handleNullValueTags(allTags);
 			regProcLogger.debug("generated tags {}", new JSONObject(allTags).toString());
-			if (!allTags.isEmpty())
+			if (!allTags.isEmpty()) {
+				long addTagsStart = System.currentTimeMillis();
 				packetManagerService.addOrUpdateTags(registrationId, allTags);
+				regProcLogger.info("PERF [{}] addOrUpdateTags took {} ms", registrationId,
+						System.currentTimeMillis() - addTagsStart);
+			}
+
+			regProcLogger.info("PERF [{}] generateAndAddTags total took {} ms", registrationId,
+					System.currentTimeMillis() - stageStart);
 		} finally {
 			executor.close();
 		}
