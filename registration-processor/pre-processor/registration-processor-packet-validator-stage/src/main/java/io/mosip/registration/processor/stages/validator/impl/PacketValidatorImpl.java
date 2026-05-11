@@ -91,9 +91,18 @@ public class PacketValidatorImpl implements PacketValidator {
             throws ApisResourceAccessException, RegistrationProcessorCheckedException, IOException,
             JsonProcessingException, PacketManagerException {
         String uin = null;
+        long validateStart = System.currentTimeMillis();
+        regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                id, "PERF_validate_START");
         try {
+            long t_packetManagerValidate = System.currentTimeMillis();
             ValidatePacketResponse response = packetManagerService.validate(id, process, ProviderStageName.PACKET_VALIDATOR);
+            regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                    id, "PERF_packetManagerValidate_COMPLETED in " + (System.currentTimeMillis() - t_packetManagerValidate) + "ms");
+            long t_getConsentField = System.currentTimeMillis();
             String consentVal = packetManagerService.getField(id, MappingJsonConstants.CONSENT, process, ProviderStageName.PACKET_VALIDATOR);
+            regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                    id, "PERF_getConsentField_COMPLETED in " + (System.currentTimeMillis() - t_getConsentField) + "ms");
             if (!response.isValid()) {
                 regProcLogger.error(LoggerFileConstant.SESSIONID.toString(),
                         LoggerFileConstant.REGISTRATIONID.toString(), id,
@@ -114,21 +123,30 @@ public class PacketValidatorImpl implements PacketValidator {
 
             if (process.equalsIgnoreCase(RegistrationType.UPDATE.toString())
                     || process.equalsIgnoreCase(RegistrationType.RES_UPDATE.toString())) {
+                long t_getUIn = System.currentTimeMillis();
                 uin = utility.getUIn(id, process, ProviderStageName.PACKET_VALIDATOR);
+                regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                        id, "PERF_getUIn_COMPLETED in " + (System.currentTimeMillis() - t_getUIn) + "ms");
                 if (uin == null) {
                     regProcLogger.error(LoggerFileConstant.SESSIONID.toString(),
                             LoggerFileConstant.REGISTRATIONID.toString(), id,
                             "ERROR =======>" + PlatformErrorMessages.RPR_PVM_INVALID_UIN.getMessage());
                     throw new IdRepoAppException(PlatformErrorMessages.RPR_PVM_INVALID_UIN.getMessage());
                 }
+                long t_retrieveIdrepoJson = System.currentTimeMillis();
                 JSONObject jsonObject = utililites.retrieveIdrepoJson(uin);
+                regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                        id, "PERF_retrieveIdrepoJson_COMPLETED in " + (System.currentTimeMillis() - t_retrieveIdrepoJson) + "ms");
                 if (jsonObject == null) {
                     regProcLogger.error(LoggerFileConstant.SESSIONID.toString(),
                             LoggerFileConstant.REGISTRATIONID.toString(), id,
                             "ERROR =======>" + PlatformErrorMessages.RPR_PIS_IDENTITY_NOT_FOUND.getMessage());
                     throw new IdRepoAppException(PlatformErrorMessages.RPR_PIS_IDENTITY_NOT_FOUND.getMessage());
                 }
+                long t_retrieveIdrepoJsonStatus = System.currentTimeMillis();
                 String status = utililites.retrieveIdrepoJsonStatus(uin);
+                regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                        id, "PERF_retrieveIdrepoJsonStatus_COMPLETED in " + (System.currentTimeMillis() - t_retrieveIdrepoJsonStatus) + "ms");
                 if (process.equalsIgnoreCase(RegistrationType.UPDATE.toString())
                         && status.equalsIgnoreCase(RegistrationType.DEACTIVATED.toString())) {
                     regProcLogger.error(LoggerFileConstant.SESSIONID.toString(),
@@ -141,17 +159,23 @@ public class PacketValidatorImpl implements PacketValidator {
 
             // document validation - pass map to cache INDIVIDUAL_BIOMETRICS and INTRODUCER_BIO for reuse in biometricsXSDValidation
             Map<String, BiometricRecord> fetchedBiometrics = new HashMap<>();
+            long t_applicantDocumentValidation = System.currentTimeMillis();
+            regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                    id, "PERF_applicantDocumentValidation_START");
             if (!applicantDocumentValidation(id, process, packetValidationDto, fetchedBiometrics)) {
                 regProcLogger.error(LoggerFileConstant.SESSIONID.toString(),
                         LoggerFileConstant.REGISTRATIONID.toString(), id,
                         "ERROR =======>" + StatusUtil.APPLICANT_DOCUMENT_VALIDATION_FAILED.getMessage());
                 return false;
             }
+            regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                    id, "PERF_applicantDocumentValidation_COMPLETED in " + (System.currentTimeMillis() - t_applicantDocumentValidation) + "ms");
 
             // check if uin is in idrepisitory
             if (RegistrationType.UPDATE.name().equalsIgnoreCase(process)
                     || RegistrationType.RES_UPDATE.name().equalsIgnoreCase(process)) {
 
+                long t_uinPresentInIdRepo = System.currentTimeMillis();
                 if (!utililites.uinPresentInIdRepo(String.valueOf(uin))) {
                     regProcLogger.error(LoggerFileConstant.SESSIONID.toString(),
                             LoggerFileConstant.REGISTRATIONID.toString(), id,
@@ -160,11 +184,18 @@ public class PacketValidatorImpl implements PacketValidator {
                     packetValidationDto.setPacketValidatonStatusCode(StatusUtil.UIN_NOT_FOUND_IDREPO.getCode());
                     return false;
                 }
+                regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                        id, "PERF_uinPresentInIdRepo_COMPLETED in " + (System.currentTimeMillis() - t_uinPresentInIdRepo) + "ms");
             }
 
+            long t_biometricsXSDValidation = System.currentTimeMillis();
+            regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                    id, "PERF_biometricsXSDValidation_START");
             if (!biometricsXSDValidation(id, process, packetValidationDto, metaInfo, fetchedBiometrics)) {
                 return false;
             }
+            regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                    id, "PERF_biometricsXSDValidation_COMPLETED in " + (System.currentTimeMillis() - t_biometricsXSDValidation) + "ms");
         } catch(PacketManagerNonRecoverableException e){
             regProcLogger.error(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
                     id, RegistrationStatusCode.FAILED.toString() + e.getMessage() + ExceptionUtils.getStackTrace(e));
@@ -182,6 +213,8 @@ public class PacketValidatorImpl implements PacketValidator {
         }
 
         packetValidationDto.setValid(true);
+        regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                id, "PERF_validate_COMPLETED in " + (System.currentTimeMillis() - validateStart) + "ms");
         return packetValidationDto.isValid();
     }
 
@@ -199,6 +232,9 @@ public class PacketValidatorImpl implements PacketValidator {
         final Map<String, String> finalMetaInfoMap = metaInfoMap;
 
         // Validate all biometric fields in parallel using virtual threads (fail-fast: cancel remaining on first failure)
+        long t_parallelBiometricValidation = System.currentTimeMillis();
+        regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                id, "PERF_parallelBiometricValidation_START fields=" + fields.size());
         ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
         try {
             List<CompletableFuture<Void>> futures = fields.stream()
@@ -274,6 +310,8 @@ public class PacketValidatorImpl implements PacketValidator {
         } finally {
             executor.close(); // waits for any still-running threads to finish (fast after shutdownNow)
         }
+        regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                id, "PERF_parallelBiometricValidation_COMPLETED in " + (System.currentTimeMillis() - t_parallelBiometricValidation) + "ms");
         return true;
     }
 

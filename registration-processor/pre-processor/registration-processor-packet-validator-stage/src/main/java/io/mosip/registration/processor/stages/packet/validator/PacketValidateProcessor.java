@@ -179,29 +179,49 @@ public class PacketValidateProcessor {
 		PacketValidationDto packetValidationDto = new PacketValidationDto();
 		String registrationId = null;
 		InternalRegistrationStatusDto registrationStatusDto = new InternalRegistrationStatusDto();
+		long processStart = System.currentTimeMillis();
 		try {
 			object.setMessageBusAddress(MessageBusAddress.PACKET_VALIDATOR_BUS_IN);
 			object.setIsValid(Boolean.FALSE);
 			object.setInternalError(Boolean.TRUE);
 			regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
 					"", "PacketValidateProcessor::process()::entry");
+			regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+					object.getRid(), "PERF_process_START");
 			registrationId = object.getRid();
 			packetValidationDto.setTransactionSuccessful(false);
+			long t_getRegStatus = System.currentTimeMillis();
 			registrationStatusDto = registrationStatusService.getRegistrationStatus(
 					registrationId, object.getReg_type(), object.getIteration(), object.getWorkflowInstanceId());
+			regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+					registrationId, "PERF_getRegistrationStatus_COMPLETED in " + (System.currentTimeMillis() - t_getRegStatus) + "ms");
 			registrationStatusDto
 					.setLatestTransactionTypeCode(RegistrationTransactionTypeCode.VALIDATE_PACKET.toString());
 			registrationStatusDto.setRegistrationStageName(stageName);
 			// Fetch metaInfo once and reuse for setPacketCreatedDateTime, validate (biometricsXSDValidation), and reverseDataSync
+			long t_getMetaInfo = System.currentTimeMillis();
 			Map<String, String> metaInfo = packetManagerService.getMetaInfo(
 					registrationStatusDto.getRegistrationId(), registrationStatusDto.getRegistrationType(), ProviderStageName.PACKET_VALIDATOR);
+			regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+					registrationId, "PERF_getMetaInfo_COMPLETED in " + (System.currentTimeMillis() - t_getMetaInfo) + "ms");
+			long t_setPacketCreatedDateTime = System.currentTimeMillis();
 			setPacketCreatedDateTime(registrationStatusDto, metaInfo);
+			regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+					registrationId, "PERF_setPacketCreatedDateTime_COMPLETED in " + (System.currentTimeMillis() - t_setPacketCreatedDateTime) + "ms");
 			// Fetch entity once for supervisor status check and sendNotification (eliminates duplicate DB call)
+			long t_findByWorkflowInstanceId = System.currentTimeMillis();
 			SyncRegistrationEntity regEntity = syncRegistrationService.findByWorkflowInstanceId(object.getWorkflowInstanceId());
+			regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+					registrationId, "PERF_findByWorkflowInstanceId_COMPLETED in " + (System.currentTimeMillis() - t_findByWorkflowInstanceId) + "ms");
 			boolean isValidSupervisorStatus = regEntity.getSupervisorStatus().equalsIgnoreCase(APPROVED);
 			if (isValidSupervisorStatus) {
+				long t_compositeValidate = System.currentTimeMillis();
+				regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+						registrationId, "PERF_compositeValidate_START");
 				Boolean isValid = compositePacketValidator.validate(object.getRid(),
 						registrationStatusDto.getRegistrationType(), packetValidationDto, metaInfo);
+				regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+						registrationId, "PERF_compositeValidate_COMPLETED in " + (System.currentTimeMillis() - t_compositeValidate) + "ms isValid=" + isValid);
 
 				if (isValid) {
 					// save audit details
@@ -209,8 +229,11 @@ public class PacketValidateProcessor {
 					String finalRegistrationId = registrationId;
 
 					try {
+						long t_saveAuditDetails = System.currentTimeMillis();
 						auditUtility.saveAuditDetails(finalRegistrationId,
 								finalRegistrationStatusDto.getRegistrationType());
+						regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+								finalRegistrationId, "PERF_saveAuditDetails_COMPLETED in " + (System.currentTimeMillis() - t_saveAuditDetails) + "ms");
 					} catch (Exception e) {
 						regProcLogger.error(LoggerFileConstant.SESSIONID.toString(),
 								LoggerFileConstant.REGISTRATIONID.toString(),
@@ -226,8 +249,13 @@ public class PacketValidateProcessor {
 					registrationStatusDto.setSubStatusCode(StatusUtil.PACKET_STRUCTURAL_VALIDATION_SUCCESS.getCode());
 					registrationStatusDto.setStatusCode(RegistrationStatusCode.PROCESSING.toString());
 					// ReverseDataSync (reuse metaInfo to avoid second getMetaInfo call)
+					long t_reverseDataSync = System.currentTimeMillis();
+					regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+							registrationId, "PERF_reverseDataSync_START");
 					reverseDataSync(registrationId, registrationStatusDto.getRegistrationType(), description,
 							packetValidationDto, metaInfo);
+					regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+							registrationId, "PERF_reverseDataSync_COMPLETED in " + (System.currentTimeMillis() - t_reverseDataSync) + "ms");
 
 					packetValidationDto.setTransactionSuccessful(true);
 					description.setMessage(
@@ -450,7 +478,12 @@ public class PacketValidateProcessor {
 					? PlatformSuccessMessages.RPR_PKR_PACKET_VALIDATE.getCode()
 					: description.getCode();
 			String moduleName = ModuleName.PACKET_VALIDATOR.toString();
+			long t_updateRegStatus = System.currentTimeMillis();
 			registrationStatusService.updateRegistrationStatus(registrationStatusDto, moduleId, moduleName);
+			regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+					registrationId, "PERF_updateRegistrationStatus_COMPLETED in " + (System.currentTimeMillis() - t_updateRegStatus) + "ms");
+			regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+					registrationId, "PERF_process_COMPLETED in " + (System.currentTimeMillis() - processStart) + "ms");
 			if (packetValidationDto.isTransactionSuccessful())
 				description.setMessage(PlatformSuccessMessages.RPR_PKR_PACKET_VALIDATE.getMessage());
 			String eventId = packetValidationDto.isTransactionSuccessful() ? EventId.RPR_402.toString()

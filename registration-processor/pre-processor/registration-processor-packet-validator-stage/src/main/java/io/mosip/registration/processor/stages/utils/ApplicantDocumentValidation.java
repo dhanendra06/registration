@@ -48,8 +48,14 @@ public class ApplicantDocumentValidation {
     private static final String VALUE = "value";
 
     public boolean validateDocument(String registrationId, String process, Map<String, BiometricRecord> fetchedBiometrics) throws IdentityNotFoundException, IOException, ApisResourceAccessException, PacketManagerException, JsonProcessingException {
+        long validateDocStart = System.currentTimeMillis();
+        regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                registrationId, "PERF_validateDocument_START");
+        long t_getMappingJson = System.currentTimeMillis();
         JSONObject docMappingJson = utility.getRegistrationProcessorMappingJson(MappingJsonConstants.DOCUMENT);
         JSONObject identityMappingJson = utility.getRegistrationProcessorMappingJson(MappingJsonConstants.IDENTITY);
+        regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                registrationId, "PERF_getMappingJson_COMPLETED in " + (System.currentTimeMillis() - t_getMappingJson) + "ms");
 
         List<String> docFieldNames = new ArrayList<>();
         for (Object doc : docMappingJson.values()) {
@@ -64,7 +70,10 @@ public class ApplicantDocumentValidation {
         List<String> allFields = new ArrayList<>(docFieldNames);
         allFields.add(applicantBiometricLabel);
         allFields.add(introducerBiometricLabel);
+        long t_getFields = System.currentTimeMillis();
         Map<String, String> fieldValues = packetManagerService.getFields(registrationId, allFields, process, ProviderStageName.PACKET_VALIDATOR);
+        regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                registrationId, "PERF_getFields_COMPLETED in " + (System.currentTimeMillis() - t_getFields) + "ms fields=" + allFields.size());
 
         // Collect documents that need fetching
         List<String> docsToFetch = new ArrayList<>();
@@ -78,6 +87,9 @@ public class ApplicantDocumentValidation {
         Map<String, CompletableFuture<Document>> docFutures = new LinkedHashMap<>();
         CompletableFuture<BiometricRecord> individualBioFuture;
         CompletableFuture<BiometricRecord> introducerBioFuture;
+        long t_parallelDocBioFetch = System.currentTimeMillis();
+        regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                registrationId, "PERF_parallelDocBioFetch_START docs=" + docsToFetch.size() + " needIndividualBio=" + needIndividualBio + " needIntroducerBio=" + needIntroducerBio);
 
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             for (String docValue : docsToFetch) {
@@ -112,6 +124,8 @@ public class ApplicantDocumentValidation {
                 rethrowChecked(e);
             }
         } // executor.close() — all tasks already done, returns immediately
+        regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                registrationId, "PERF_parallelDocBioFetch_COMPLETED in " + (System.currentTimeMillis() - t_parallelDocBioFetch) + "ms");
 
         // Validate results — all futures already completed, .join() is instant
         for (Map.Entry<String, CompletableFuture<Document>> entry : docFutures.entrySet()) {
@@ -142,6 +156,8 @@ public class ApplicantDocumentValidation {
 
         regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
                 registrationId, "ApplicantDocumentValidation::validateApplicantData::exit");
+        regProcLogger.info(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                registrationId, "PERF_validateDocument_COMPLETED in " + (System.currentTimeMillis() - validateDocStart) + "ms");
         return true;
     }
 
