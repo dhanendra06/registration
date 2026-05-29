@@ -26,13 +26,13 @@ public class PacketManagerConfig {
 	
 	@Bean
 	@Primary
-	public FileManager<DirectoryPathDto, InputStream> filemanager() {
+	public FileManager<DirectoryPathDto, InputStream> packetManagerFileManager() {
 		return new FileManagerImpl();
 	}
 
     @Bean
 	@Primary
-    public Decryptor getDecryptor() {
+    public Decryptor packetManagerDecryptor() {
         return new DecryptorImpl();
     }
 
