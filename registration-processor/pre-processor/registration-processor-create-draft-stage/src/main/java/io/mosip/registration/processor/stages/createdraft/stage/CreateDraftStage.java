@@ -1,0 +1,370 @@
+package io.mosip.registration.processor.stages.createdraft.stage;
+
+import java.util.ArrayList;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.stereotype.Service;
+
+import io.mosip.kernel.core.logger.spi.Logger;
+import io.mosip.kernel.core.util.StringUtils;
+import io.mosip.registration.processor.core.abstractverticle.MessageBusAddress;
+import io.mosip.registration.processor.core.abstractverticle.MessageDTO;
+import io.mosip.registration.processor.core.abstractverticle.MosipEventBus;
+import io.mosip.registration.processor.core.abstractverticle.MosipRouter;
+import io.mosip.registration.processor.core.abstractverticle.MosipVerticleAPIManager;
+import io.mosip.registration.processor.core.code.ApiName;
+import io.mosip.registration.processor.core.code.EventId;
+import io.mosip.registration.processor.core.code.EventName;
+import io.mosip.registration.processor.core.code.EventType;
+import io.mosip.registration.processor.core.code.ModuleName;
+import io.mosip.registration.processor.core.code.RegistrationExceptionTypeCode;
+import io.mosip.registration.processor.core.code.RegistrationTransactionStatusCode;
+import io.mosip.registration.processor.core.code.RegistrationTransactionTypeCode;
+import io.mosip.registration.processor.core.constant.LoggerFileConstant;
+import io.mosip.registration.processor.core.constant.ProviderStageName;
+import io.mosip.registration.processor.core.exception.ApisResourceAccessException;
+import io.mosip.registration.processor.core.exception.util.PlatformErrorMessages;
+import io.mosip.registration.processor.core.exception.util.PlatformSuccessMessages;
+import io.mosip.registration.processor.core.logger.LogDescription;
+import io.mosip.registration.processor.core.logger.RegProcessorLogger;
+import io.mosip.registration.processor.core.spi.restclient.RegistrationProcessorRestClientService;
+import io.mosip.registration.processor.core.status.util.StatusUtil;
+import io.mosip.registration.processor.core.status.util.TrimExceptionMessage;
+import io.mosip.registration.processor.core.util.RegistrationExceptionMapperUtil;
+import io.mosip.registration.processor.packet.manager.exception.IdrepoDraftException;
+import io.mosip.registration.processor.packet.manager.exception.IdrepoDraftReprocessableException;
+import io.mosip.registration.processor.packet.manager.idreposervice.IdrepoDraftService;
+import io.mosip.registration.processor.packet.storage.utils.Utility;
+import io.mosip.registration.processor.rest.client.audit.builder.AuditLogRequestBuilder;
+import io.mosip.registration.processor.stages.createdraft.dto.UinGenResponseDto;
+import io.mosip.registration.processor.status.code.RegistrationStatusCode;
+import io.mosip.registration.processor.status.code.RegistrationType;
+import io.mosip.registration.processor.status.dto.InternalRegistrationStatusDto;
+import io.mosip.registration.processor.status.dto.RegistrationStatusDto;
+import io.mosip.registration.processor.status.service.RegistrationStatusService;
+
+/**
+ * Create Draft Stage – introduces a new stage placed before the Quality
+ * Classifier stage. Responsible for creating (or re-creating) an ID Repository
+ * Draft for NEW and UPDATE packets, with mandatory UIN allocation.
+ *
+ * <p>Workflow position: … → Packet Classifier → Create Draft → Quality Classifier → …</p>
+ */
+@Service
+@Configuration
+@ComponentScan(basePackages = { "${mosip.auth.adapter.impl.basepackage}",
+        "io.mosip.registration.processor.core.config",
+        "io.mosip.registration.processor.stages.createdraft.config",
+        "io.mosip.registration.processor.stages.config",
+        "io.mosip.registration.processor.status.config",
+        "io.mosip.registration.processor.rest.client.config",
+        "io.mosip.registration.processor.packet.storage.config",
+        "io.mosip.registration.processor.packet.manager.config",
+        "io.mosip.registration.processor.core.kernel.beans" })
+public class CreateDraftStage extends MosipVerticleAPIManager {
+
+    private static final String STAGE_PROPERTY_PREFIX = "mosip.regproc.create.draft.";
+
+    private static Logger regProcLogger = RegProcessorLogger.getLogger(CreateDraftStage.class);
+
+    /** The cluster manager url. */
+    @Value("${vertx.cluster.configuration}")
+    private String clusterManagerUrl;
+
+    /** Worker pool size. */
+    @Value("${worker.pool.size}")
+    private Integer workerPoolSize;
+
+    /** Message expiry time limit (seconds). */
+    @Value("${mosip.regproc.create.draft.message.expiry-time-limit}")
+    private Long messageExpiryTimeLimit;
+
+    /** Mosip router for APIs. */
+    @Autowired
+    private MosipRouter router;
+
+    /** Registration status service. */
+    @Autowired
+    private RegistrationStatusService<String, InternalRegistrationStatusDto, RegistrationStatusDto> registrationStatusService;
+
+    /** Draft service for ID Repository draft operations. */
+    @Autowired
+    private IdrepoDraftService idrepoDraftService;
+
+    /** REST client service for external API calls (UIN Generator). */
+    @Autowired
+    private RegistrationProcessorRestClientService<Object> registrationProcessorRestClientService;
+
+    /** Utility for retrieving UIN from the packet. */
+    @Autowired
+    private Utility utility;
+
+    /** Audit log request builder. */
+    @Autowired
+    private AuditLogRequestBuilder auditLogRequestBuilder;
+
+    /** Status mapper utility. */
+    @Autowired
+    private RegistrationExceptionMapperUtil registrationStatusMapperUtil;
+
+    private TrimExceptionMessage trimExceptionMessage = new TrimExceptionMessage();
+
+    /** Mosip event bus. */
+    MosipEventBus mosipEventBus = null;
+
+    /**
+     * Deploy verticle – wires up the event bus consumer/producer.
+     */
+    public void deployVerticle() {
+        mosipEventBus = this.getEventBus(this, clusterManagerUrl, workerPoolSize);
+        this.consumeAndSend(mosipEventBus, MessageBusAddress.CREATE_DRAFT_BUS_IN,
+                MessageBusAddress.CREATE_DRAFT_BUS_OUT, messageExpiryTimeLimit);
+    }
+
+    @Override
+    public void start() {
+        router.setRoute(this.postUrl(getVertx(), MessageBusAddress.CREATE_DRAFT_BUS_IN,
+                MessageBusAddress.CREATE_DRAFT_BUS_OUT));
+        this.createServer(router.getRouter(), getPort());
+    }
+
+    @Override
+    protected String getPropertyPrefix() {
+        return STAGE_PROPERTY_PREFIX;
+    }
+
+    /**
+     * Main processing method.
+     *
+     * <ul>
+     *   <li>NEW packets  – allocates a UIN via the UIN Generator service, then creates
+     *       (or discards-and-re-creates) a Draft in ID Repository.</li>
+     *   <li>UPDATE packets – retrieves the existing UIN from the packet and
+     *       creates (or discards-and-re-creates) a Draft.</li>
+     *   <li>All other packet types – passed through without any draft operation.</li>
+     * </ul>
+     */
+    @Override
+    public MessageDTO process(MessageDTO object) {
+        object.setMessageBusAddress(MessageBusAddress.CREATE_DRAFT_BUS_IN);
+        object.setInternalError(Boolean.FALSE);
+        object.setIsValid(Boolean.TRUE);
+
+        String registrationId = object.getRid();
+        String regType = object.getReg_type();
+        boolean isTransactionSuccessful = Boolean.FALSE;
+        LogDescription description = new LogDescription();
+
+        regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(), LoggerFileConstant.REGISTRATIONID.toString(),
+                registrationId, "CreateDraftStage::process()::entry");
+
+        InternalRegistrationStatusDto registrationStatusDto = registrationStatusService.getRegistrationStatus(
+                registrationId, regType, object.getIteration(), object.getWorkflowInstanceId());
+
+        try {
+            registrationStatusDto.setLatestTransactionTypeCode(
+                    RegistrationTransactionTypeCode.CREATE_DRAFT.toString());
+            registrationStatusDto.setRegistrationStageName(getStageName());
+
+            // Skip draft creation for packet types other than NEW and UPDATE
+            if (!RegistrationType.NEW.toString().equalsIgnoreCase(regType)
+                    && !RegistrationType.UPDATE.toString().equalsIgnoreCase(regType)) {
+
+                regProcLogger.info(LoggerFileConstant.SESSIONID.toString(),
+                        LoggerFileConstant.REGISTRATIONID.toString(), registrationId,
+                        "Skipping create draft for reg type: " + regType);
+
+                object.setIsValid(Boolean.TRUE);
+                isTransactionSuccessful = Boolean.TRUE;
+                registrationStatusDto.setLatestTransactionStatusCode(
+                        RegistrationTransactionStatusCode.SUCCESS.toString());
+                registrationStatusDto.setStatusCode(RegistrationStatusCode.PROCESSING.toString());
+                registrationStatusDto.setStatusComment(StatusUtil.CREATE_DRAFT_SKIPPED.getMessage());
+                registrationStatusDto.setSubStatusCode(StatusUtil.CREATE_DRAFT_SKIPPED.getCode());
+                description.setCode(PlatformSuccessMessages.RPR_CREATE_DRAFT_SUCCESS.getCode());
+                description.setMessage(PlatformSuccessMessages.RPR_CREATE_DRAFT_SUCCESS.getMessage());
+                return object;
+            }
+
+            // If a draft already exists (e.g. reprocessed packet), discard it first
+            if (idrepoDraftService.idrepoHasDraft(registrationId)) {
+                regProcLogger.info(LoggerFileConstant.SESSIONID.toString(),
+                        LoggerFileConstant.REGISTRATIONID.toString(), registrationId,
+                        "Draft already exists. Discarding before re-creation.");
+                idrepoDraftService.idrepoDiscardDraft(registrationId);
+            }
+
+            // Determine the UIN to associate with the draft
+            String uin;
+            if (RegistrationType.NEW.toString().equalsIgnoreCase(regType)) {
+                uin = allocateUin(registrationId);
+            } else {
+                // UPDATE packet – fetch the existing UIN from the packet
+                uin = utility.getUIn(registrationId, registrationStatusDto.getRegistrationType(),
+                        ProviderStageName.CREATE_DRAFT);
+                if (StringUtils.isEmpty(uin) || "null".equalsIgnoreCase(uin)) {
+                    regProcLogger.error(LoggerFileConstant.SESSIONID.toString(),
+                            LoggerFileConstant.REGISTRATIONID.toString(), registrationId,
+                            "UIN not found for UPDATE packet.");
+                    throw new ApisResourceAccessException(
+                            PlatformErrorMessages.RPR_CDS_UIN_NOT_FOUND_FOR_UPDATE.getMessage());
+                }
+            }
+
+            // Create the draft in ID Repository
+            boolean created = idrepoDraftService.idrepoCreateDraft(registrationId, uin);
+            if (!created) {
+                throw new IdrepoDraftException(
+                        PlatformErrorMessages.RPR_CDS_DRAFT_CREATION_FAILED.getCode(),
+                        PlatformErrorMessages.RPR_CDS_DRAFT_CREATION_FAILED.getMessage());
+            }
+
+            isTransactionSuccessful = Boolean.TRUE;
+            object.setIsValid(Boolean.TRUE);
+            registrationStatusDto.setLatestTransactionStatusCode(
+                    RegistrationTransactionStatusCode.SUCCESS.toString());
+            registrationStatusDto.setStatusCode(RegistrationStatusCode.PROCESSING.toString());
+            registrationStatusDto.setStatusComment(StatusUtil.CREATE_DRAFT_SUCCESS.getMessage());
+            registrationStatusDto.setSubStatusCode(StatusUtil.CREATE_DRAFT_SUCCESS.getCode());
+            description.setCode(PlatformSuccessMessages.RPR_CREATE_DRAFT_SUCCESS.getCode());
+            description.setMessage(PlatformSuccessMessages.RPR_CREATE_DRAFT_SUCCESS.getMessage());
+
+            regProcLogger.info(LoggerFileConstant.SESSIONID.toString(),
+                    LoggerFileConstant.REGISTRATIONID.toString(), registrationId,
+                    "Draft created successfully for regType: " + regType);
+
+        } catch (ApisResourceAccessException e) {
+            regProcLogger.error(LoggerFileConstant.SESSIONID.toString(),
+                    LoggerFileConstant.REGISTRATIONID.toString(), registrationId,
+                    PlatformErrorMessages.RPR_CDS_DRAFT_CREATION_FAILED.getMessage()
+                            + org.apache.commons.lang3.exception.ExceptionUtils.getStackTrace(e));
+            registrationStatusDto.setStatusCode(RegistrationStatusCode.PROCESSING.name());
+            registrationStatusDto.setStatusComment(trimExceptionMessage.trimExceptionMessage(
+                    StatusUtil.CREATE_DRAFT_FAILED.getMessage() + e.getMessage()));
+            registrationStatusDto.setSubStatusCode(StatusUtil.CREATE_DRAFT_FAILED.getCode());
+            registrationStatusDto.setLatestTransactionStatusCode(registrationStatusMapperUtil
+                    .getStatusCode(RegistrationExceptionTypeCode.APIS_RESOURCE_ACCESS_EXCEPTION));
+            description.setCode(PlatformErrorMessages.RPR_CDS_DRAFT_CREATION_FAILED.getCode());
+            description.setMessage(PlatformErrorMessages.RPR_CDS_DRAFT_CREATION_FAILED.getMessage());
+            object.setInternalError(Boolean.TRUE);
+
+        } catch (IdrepoDraftReprocessableException e) {
+            regProcLogger.error(LoggerFileConstant.SESSIONID.toString(),
+                    LoggerFileConstant.REGISTRATIONID.toString(), registrationId,
+                    PlatformErrorMessages.RPR_CDS_DRAFT_CREATION_FAILED.getMessage()
+                            + org.apache.commons.lang3.exception.ExceptionUtils.getStackTrace(e));
+            registrationStatusDto.setStatusCode(RegistrationStatusCode.PROCESSING.name());
+            registrationStatusDto.setStatusComment(trimExceptionMessage.trimExceptionMessage(
+                    StatusUtil.CREATE_DRAFT_FAILED.getMessage() + e.getMessage()));
+            registrationStatusDto.setSubStatusCode(StatusUtil.CREATE_DRAFT_FAILED.getCode());
+            registrationStatusDto.setLatestTransactionStatusCode(registrationStatusMapperUtil
+                    .getStatusCode(RegistrationExceptionTypeCode.IDREPO_DRAFT_REPROCESSABLE_EXCEPTION));
+            description.setCode(PlatformErrorMessages.RPR_CDS_DRAFT_CREATION_FAILED.getCode());
+            description.setMessage(PlatformErrorMessages.RPR_CDS_DRAFT_CREATION_FAILED.getMessage());
+            object.setInternalError(Boolean.TRUE);
+
+        } catch (IdrepoDraftException e) {
+            regProcLogger.error(LoggerFileConstant.SESSIONID.toString(),
+                    LoggerFileConstant.REGISTRATIONID.toString(), registrationId,
+                    PlatformErrorMessages.RPR_CDS_DRAFT_CREATION_FAILED.getMessage()
+                            + org.apache.commons.lang3.exception.ExceptionUtils.getStackTrace(e));
+            registrationStatusDto.setStatusCode(RegistrationStatusCode.PROCESSING.name());
+            registrationStatusDto.setStatusComment(trimExceptionMessage.trimExceptionMessage(
+                    StatusUtil.CREATE_DRAFT_FAILED.getMessage() + e.getMessage()));
+            registrationStatusDto.setSubStatusCode(StatusUtil.CREATE_DRAFT_FAILED.getCode());
+            registrationStatusDto.setLatestTransactionStatusCode(registrationStatusMapperUtil
+                    .getStatusCode(RegistrationExceptionTypeCode.IDREPO_DRAFT_EXCEPTION));
+            description.setCode(PlatformErrorMessages.RPR_CDS_DRAFT_CREATION_FAILED.getCode());
+            description.setMessage(PlatformErrorMessages.RPR_CDS_DRAFT_CREATION_FAILED.getMessage());
+            object.setInternalError(Boolean.TRUE);
+
+        } catch (Exception e) {
+            regProcLogger.error(LoggerFileConstant.SESSIONID.toString(),
+                    LoggerFileConstant.REGISTRATIONID.toString(), registrationId,
+                    PlatformErrorMessages.RPR_CDS_DRAFT_CREATION_FAILED.getMessage()
+                            + org.apache.commons.lang3.exception.ExceptionUtils.getStackTrace(e));
+            registrationStatusDto.setStatusCode(RegistrationStatusCode.PROCESSING.name());
+            registrationStatusDto.setStatusComment(trimExceptionMessage.trimExceptionMessage(
+                    StatusUtil.CREATE_DRAFT_FAILED.getMessage() + e.getMessage()));
+            registrationStatusDto.setSubStatusCode(StatusUtil.CREATE_DRAFT_FAILED.getCode());
+            registrationStatusDto.setLatestTransactionStatusCode(registrationStatusMapperUtil
+                    .getStatusCode(RegistrationExceptionTypeCode.EXCEPTION));
+            description.setCode(PlatformErrorMessages.RPR_CDS_DRAFT_CREATION_FAILED.getCode());
+            description.setMessage(PlatformErrorMessages.RPR_CDS_DRAFT_CREATION_FAILED.getMessage());
+            object.setInternalError(Boolean.TRUE);
+
+        } finally {
+            if (object.getInternalError()) {
+                updateErrorFlags(registrationStatusDto, object);
+            }
+            object.setRid(registrationStatusDto.getRegistrationId());
+            registrationStatusDto.setRegistrationStageName(getStageName());
+            String moduleId = isTransactionSuccessful
+                    ? PlatformSuccessMessages.RPR_CREATE_DRAFT_SUCCESS.getCode()
+                    : description.getCode();
+            String moduleName = ModuleName.CREATE_DRAFT.toString();
+            registrationStatusService.updateRegistrationStatus(registrationStatusDto, moduleId, moduleName);
+            String eventId = isTransactionSuccessful ? EventId.RPR_402.toString() : EventId.RPR_405.toString();
+            String eventName = isTransactionSuccessful ? EventName.UPDATE.toString() : EventName.EXCEPTION.toString();
+            String eventType = isTransactionSuccessful ? EventType.BUSINESS.toString() : EventType.SYSTEM.toString();
+            auditLogRequestBuilder.createAuditRequestBuilder(description.getMessage(), eventId, eventName,
+                    eventType, moduleId, moduleName, registrationId);
+        }
+
+        return object;
+    }
+
+    /**
+     * Calls the UIN Generator kernel service to allocate a new UIN.
+     *
+     * @param registrationId the registration ID (used only for logging)
+     * @return the newly allocated UIN string
+     * @throws ApisResourceAccessException if the UIN Generator service call fails
+     */
+    private String allocateUin(String registrationId) throws ApisResourceAccessException {
+        regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(),
+                LoggerFileConstant.REGISTRATIONID.toString(), registrationId,
+                "Allocating UIN via UIN Generator service");
+
+        UinGenResponseDto uinResponse = (UinGenResponseDto) registrationProcessorRestClientService.getApi(
+                ApiName.UINGENERATOR, new ArrayList<>(), "", "", UinGenResponseDto.class);
+
+        if (uinResponse == null || uinResponse.getErrors() != null && !uinResponse.getErrors().isEmpty()) {
+            String errorMsg = uinResponse != null && uinResponse.getErrors() != null
+                    ? uinResponse.getErrors().get(0).getMessage()
+                    : "Null response from UIN Generator";
+            regProcLogger.error(LoggerFileConstant.SESSIONID.toString(),
+                    LoggerFileConstant.REGISTRATIONID.toString(), registrationId,
+                    "UIN allocation failed: " + errorMsg);
+            throw new ApisResourceAccessException(
+                    PlatformErrorMessages.RPR_CDS_UIN_ALLOCATION_FAILED.getMessage() + " : " + errorMsg);
+        }
+
+        if (uinResponse.getResponse() == null || StringUtils.isEmpty(uinResponse.getResponse().getUin())) {
+            regProcLogger.error(LoggerFileConstant.SESSIONID.toString(),
+                    LoggerFileConstant.REGISTRATIONID.toString(), registrationId,
+                    "UIN Generator returned empty UIN");
+            throw new ApisResourceAccessException(
+                    PlatformErrorMessages.RPR_CDS_UIN_ALLOCATION_FAILED.getMessage());
+        }
+
+        String uin = uinResponse.getResponse().getUin();
+        regProcLogger.info(LoggerFileConstant.SESSIONID.toString(),
+                LoggerFileConstant.REGISTRATIONID.toString(), registrationId,
+                "UIN allocated successfully");
+        return uin;
+    }
+
+    private void updateErrorFlags(InternalRegistrationStatusDto registrationStatusDto, MessageDTO object) {
+        object.setInternalError(true);
+        if (registrationStatusDto.getLatestTransactionStatusCode()
+                .equalsIgnoreCase(RegistrationTransactionStatusCode.REPROCESS.toString())) {
+            object.setIsValid(true);
+        } else {
+            object.setIsValid(false);
+        }
+    }
+}

@@ -119,6 +119,8 @@ public enum PlatformSuccessMessages {
 
 	RPR_LINK_RID_FOR_LOST_PACKET_SUCCESS(PlatformConstants.RPR_UIN_GENERATOR_STAGE + "004", "UIN Generator  Success"),
 
+	RPR_CREATE_DRAFT_SUCCESS(PlatformConstants.RPR_CREATE_DRAFT_STAGE + "000", "Create Draft Success"),
+
 	RPR_QUALITY_CHECK_SUCCESS(PlatformConstants.RPR_QUALITY_CHECKER_MODULE + "000", "Quality check  Success"),
 
 	RPR_PRINT_STAGE_REQUEST_SUCCESS(PlatformConstants.RPR_PRINTING_MODULE + "000",

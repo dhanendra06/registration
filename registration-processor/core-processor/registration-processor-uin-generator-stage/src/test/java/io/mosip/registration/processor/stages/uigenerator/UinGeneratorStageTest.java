@@ -2882,7 +2882,7 @@ public class UinGeneratorStageTest {
 		demographicIdentity.put(MappingJsonConstants.IDSCHEMA_VERSION, 1.0);
 
 		ReflectionTestUtils.invokeMethod(uinGeneratorStage, "updatePacketCreatedOnInDemographicIdentity",
-				rid, internalRegistrationStatusDto, demographicIdentity, messageDTO, null);
+				rid, internalRegistrationStatusDto, demographicIdentity, messageDTO);
 		assertNull(demographicIdentity.get("packetCreatedOn"));
 
 	}
@@ -2898,12 +2898,13 @@ public class UinGeneratorStageTest {
 		internalRegistrationStatusDto.setRegistrationType("NEW");
 
 		when(utility.getMappedFieldName(MappingJsonConstants.PACKET_CREATED_ON)).thenReturn("packetCreatedOn");
+		when(utility.retrieveCreatedDateFromPacket(anyString(), anyString(), any())).thenReturn("2019-01-17T06:29:01.940Z");
 
 		org.json.simple.JSONObject demographicIdentity = new org.json.simple.JSONObject();
 		demographicIdentity.put(MappingJsonConstants.IDSCHEMA_VERSION, 1.0);
 
 		ReflectionTestUtils.invokeMethod(uinGeneratorStage, "updatePacketCreatedOnInDemographicIdentity",
-				rid, internalRegistrationStatusDto, demographicIdentity, messageDTO, "2019-01-17T06:29:01.940Z");
+				rid, internalRegistrationStatusDto, demographicIdentity, messageDTO);
 
 		assertEquals("2019-01-17T06:29:01.940Z", demographicIdentity.get("packetCreatedOn"));
 	}
@@ -2919,12 +2920,13 @@ public class UinGeneratorStageTest {
 		internalRegistrationStatusDto.setRegistrationType("UPDATE");
 
 		when(utility.getMappedFieldName(MappingJsonConstants.PACKET_CREATED_ON)).thenReturn("packetCreatedOn");
+		when(utility.retrieveCreatedDateFromPacket(anyString(), anyString(), any())).thenReturn("2019-01-17T06:29:01.940Z");
 
 		org.json.simple.JSONObject demographicIdentity = new org.json.simple.JSONObject();
 		demographicIdentity.put(MappingJsonConstants.IDSCHEMA_VERSION, 1.0);
 
 		ReflectionTestUtils.invokeMethod(uinGeneratorStage, "updatePacketCreatedOnInDemographicIdentity",
-				rid, internalRegistrationStatusDto, demographicIdentity, messageDTO, "2019-01-17T06:29:01.940Z");
+				rid, internalRegistrationStatusDto, demographicIdentity, messageDTO);
 
 		assertEquals("2019-01-17T06:29:01.940Z", demographicIdentity.get("packetCreatedOn"));
 	}
@@ -2946,7 +2948,7 @@ public class UinGeneratorStageTest {
 		demographicIdentity.put(MappingJsonConstants.IDSCHEMA_VERSION, 1.0);
 
 		ReflectionTestUtils.invokeMethod(uinGeneratorStage, "updatePacketCreatedOnInDemographicIdentity",
-				rid, internalRegistrationStatusDto, demographicIdentity, messageDTO, null);
+				rid, internalRegistrationStatusDto, demographicIdentity, messageDTO);
 
 		assertNull(demographicIdentity.get("packetCreatedOn"));
 	}
@@ -2968,10 +2970,39 @@ public class UinGeneratorStageTest {
 		demographicIdentity.put(MappingJsonConstants.IDSCHEMA_VERSION, 1.0);
 
 		ReflectionTestUtils.invokeMethod(uinGeneratorStage, "updatePacketCreatedOnInDemographicIdentity",
-				rid, internalRegistrationStatusDto, demographicIdentity, messageDTO, null);
+				rid, internalRegistrationStatusDto, demographicIdentity, messageDTO);
 
 		assertNull(demographicIdentity.get("packetCreatedOn"));
 	}
+
+	@Test
+	public void testPublishDraftCalledOnNewPacketSuccess() throws Exception {
+		MessageDTO messageDTO = new MessageDTO();
+		messageDTO.setRid("27847657360002520181210094052");
+		messageDTO.setReg_type(RegistrationType.NEW.name());
+
+		io.mosip.registration.processor.packet.manager.dto.IdResponseDTO idResponseDTO =
+				new io.mosip.registration.processor.packet.manager.dto.IdResponseDTO();
+		io.mosip.registration.processor.packet.manager.dto.ResponseDTO responseDTO =
+				new io.mosip.registration.processor.packet.manager.dto.ResponseDTO();
+		responseDTO.setStatus("ACTIVATED");
+		idResponseDTO.setErrors(null);
+		idResponseDTO.setId("mosip.id.update");
+		idResponseDTO.setResponse(responseDTO);
+		idResponseDTO.setResponsetime("2019-01-17T06:29:01.940Z");
+		idResponseDTO.setVersion("1.0");
+
+		when(idrepoDraftService.idrepoUpdateDraft(anyString(), any(), any())).thenReturn(idResponseDTO);
+		when(utilities.getRegistrationProcessorMappingJson(MappingJsonConstants.IDENTITY)).thenReturn(identityObj);
+		when(utilities.getRegistrationProcessorMappingJson(MappingJsonConstants.DOCUMENT)).thenReturn(documentObj);
+
+		MessageDTO result = uinGeneratorStage.process(messageDTO);
+
+		assertTrue(result.getIsValid());
+		assertFalse(result.getInternalError());
+		verify(idrepoDraftService).idrepoPublishDraft(messageDTO.getRid());
+	}
+
 
 	/**
 	 * Schema without packetCreatedOn: process() must not call retrieveCreatedDateFromPacket (MOSIP-44732 behaviour).
@@ -3006,6 +3037,29 @@ public class UinGeneratorStageTest {
 		assertTrue(result.getIsValid());
 	}
 
+
+
+	@Test
+	public void testPublishDraftNotCalledWhenDraftUpdateFails() throws Exception {
+		MessageDTO messageDTO = new MessageDTO();
+		messageDTO.setRid("27847657360002520181210094052");
+		messageDTO.setReg_type(RegistrationType.NEW.name());
+
+		when(registrationStatusMapperUtil
+				.getStatusCode(RegistrationExceptionTypeCode.IDREPO_DRAFT_EXCEPTION)).thenReturn("FAILED");
+		when(idrepoDraftService.idrepoUpdateDraft(anyString(), any(), any()))
+				.thenThrow(io.mosip.registration.processor.packet.manager.exception.IdrepoDraftException.class);
+		when(utilities.getRegistrationProcessorMappingJson(MappingJsonConstants.IDENTITY)).thenReturn(identityObj);
+		when(utilities.getRegistrationProcessorMappingJson(MappingJsonConstants.DOCUMENT)).thenReturn(documentObj);
+
+		MessageDTO result = uinGeneratorStage.process(messageDTO);
+
+		assertTrue(result.getInternalError());
+		verify(idrepoDraftService, Mockito.never()).idrepoPublishDraft(anyString());
+	}
+
+
+
 	@Test
 	public void testProcessNew_WhenPacketCreatedOnInSchema_CallsRetrieveCreatedDateFromPacket() throws Exception {
 		MessageDTO messageDTO = new MessageDTO();
@@ -3014,6 +3068,7 @@ public class UinGeneratorStageTest {
 
 		when(idSchemaUtil.getDefaultFields(anyDouble())).thenReturn(Arrays.asList("name", "dob", "gender",
 				MappingJsonConstants.PACKET_CREATED_ON));
+		when(utility.getMappedFieldName(MappingJsonConstants.PACKET_CREATED_ON)).thenReturn("packetCreatedOn");
 
 		IdResponseDTO idResponseDTO = new IdResponseDTO();
 		ResponseDTO responseDTO = new ResponseDTO();
@@ -3052,6 +3107,7 @@ public class UinGeneratorStageTest {
 
 		when(idSchemaUtil.getDefaultFields(anyDouble())).thenReturn(Arrays.asList("name", "dob",
 				MappingJsonConstants.PACKET_CREATED_ON));
+		when(utility.getMappedFieldName(MappingJsonConstants.PACKET_CREATED_ON)).thenReturn("packetCreatedOn");
 
 		IdResponseDTO idResponseDTO = new IdResponseDTO();
 		ResponseDTO responseDTO = new ResponseDTO();
@@ -3245,6 +3301,6 @@ public class UinGeneratorStageTest {
 		verify(utility, never()).retrieveCreatedDateFromPacket(anyString(), any(), any(ProviderStageName.class));
 		assertFalse(result.getInternalError());
 		assertTrue(result.getIsValid());
-	}
 
 }
+	}

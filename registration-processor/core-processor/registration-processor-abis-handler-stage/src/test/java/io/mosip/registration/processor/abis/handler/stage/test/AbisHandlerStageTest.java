@@ -75,6 +75,8 @@ import io.mosip.registration.processor.core.spi.eventbus.EventHandler;
 import io.mosip.registration.processor.core.spi.packetmanager.PacketInfoManager;
 import io.mosip.registration.processor.core.spi.restclient.RegistrationProcessorRestClientService;
 import io.mosip.registration.processor.packet.storage.dto.ApplicantInfoDto;
+import io.mosip.registration.processor.packet.manager.dto.ResponseDTO;
+import io.mosip.registration.processor.packet.manager.idreposervice.IdrepoDraftService;
 import io.mosip.registration.processor.packet.storage.utils.PacketManagerService;
 import io.mosip.registration.processor.packet.storage.utils.PriorityBasedPacketManagerService;
 import io.mosip.registration.processor.packet.storage.utils.Utilities;
@@ -114,6 +116,9 @@ public class AbisHandlerStageTest {
 	
 	@Mock
 	private PacketManagerService packetService;
+
+	@Mock
+	private IdrepoDraftService idrepoDraftService;
 
 	@Mock
 	private LogDescription description;
@@ -230,8 +235,10 @@ public class AbisHandlerStageTest {
 		Mockito.when(description.getMessage()).thenReturn("description");
 
 		
+		// Default stub: draft API returns empty response (no documents) → falls back to packet manager
+		Mockito.when(idrepoDraftService.idrepoGetDraft(any(), anyString())).thenReturn(new ResponseDTO());
 		Mockito.when(packetManagerService.getBiometrics(any(), any(), any(), any(), any())).thenReturn(getBiometricRecord(Arrays.asList("Left Thumb" ,"Right Thumb" , "Left MiddleFinger" ,
-				"Left RingFinger" ,"Left LittleFinger" ,"Left IndexFinger" ,"Right MiddleFinger" , 
+				"Left RingFinger" ,"Left LittleFinger" ,"Left IndexFinger" ,"Right MiddleFinger" ,
 				"Right RingFinger" ,"Right LittleFinger" ,"Right IndexFinger" ,
 				"Left" ,"Right","Face"),false));
 		mockDataSharePolicy(Lists.newArrayList(BiometricType.FINGER,BiometricType.IRIS,BiometricType.FACE));

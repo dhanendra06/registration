@@ -57,6 +57,10 @@ import io.mosip.registration.processor.core.status.util.StatusUtil;
 import io.mosip.registration.processor.core.status.util.TrimExceptionMessage;
 import io.mosip.registration.processor.core.util.JsonUtil;
 import io.mosip.registration.processor.core.util.RegistrationExceptionMapperUtil;
+import io.mosip.registration.processor.core.idrepo.dto.Documents;
+import io.mosip.registration.processor.core.idrepo.dto.ResponseDTO;
+import io.mosip.registration.processor.packet.manager.exception.IdrepoDraftException;
+import io.mosip.registration.processor.packet.manager.idreposervice.IdrepoDraftService;
 import io.mosip.registration.processor.packet.manager.idreposervice.IdRepoService;
 import io.mosip.registration.processor.packet.storage.dto.ApplicantInfoDto;
 import io.mosip.registration.processor.packet.storage.exception.IdentityNotFoundException;
@@ -86,6 +90,9 @@ public class BioDedupeProcessor {
 	/** The utilities. */
 	@Autowired
 	Utilities utilities;
+
+	@Autowired
+	private IdrepoDraftService idrepoDraftService;
 
 	@Autowired
 	private IdRepoService idRepoService;
@@ -405,10 +412,35 @@ public class BioDedupeProcessor {
 	private void updatePacketPreAbisIdentification(InternalRegistrationStatusDto registrationStatusDto,
 			MessageDTO object) throws IOException, ApisResourceAccessException, PacketManagerException, JsonProcessingException {
 
-		String bioField = priorityBasedPacketManagerService.getFieldByMappingJsonKey(registrationStatusDto.getRegistrationId(),
-				MappingJsonConstants.INDIVIDUAL_BIOMETRICS, registrationStatusDto.getRegistrationType(), ProviderStageName.BIO_DEDUPE);
+		boolean hasBiometrics = false;
+		try {
+			io.mosip.registration.processor.packet.manager.dto.ResponseDTO draftBioResponse = idrepoDraftService.idrepoGetDraft(
+					registrationStatusDto.getRegistrationId(), "biometrics");
+			if (draftBioResponse.getDocuments() != null) {
+				org.json.simple.JSONObject regProcessorIdentityJson = utilities
+						.getRegistrationProcessorMappingJson(MappingJsonConstants.IDENTITY);
+				String individualBiometricsLabel = JsonUtil.getJSONValue(
+						JsonUtil.getJSONObject(regProcessorIdentityJson, MappingJsonConstants.INDIVIDUAL_BIOMETRICS),
+						MappingJsonConstants.VALUE);
+				for (Documents doc : draftBioResponse.getDocuments()) {
+					if (doc.getCategory().equalsIgnoreCase(individualBiometricsLabel)) {
+						hasBiometrics = true;
+						break;
+					}
+				}
+			}
+		} catch (Exception e) {
+			regProcLogger.warn(LoggerFileConstant.SESSIONID.toString(),
+					LoggerFileConstant.REGISTRATIONID.toString(),
+					registrationStatusDto.getRegistrationId(),
+					"Failed to get biometrics from draft, falling back to packet manager: " + e.getMessage());
+			String bioField = priorityBasedPacketManagerService.getFieldByMappingJsonKey(
+					registrationStatusDto.getRegistrationId(), MappingJsonConstants.INDIVIDUAL_BIOMETRICS,
+					registrationStatusDto.getRegistrationType(), ProviderStageName.BIO_DEDUPE);
+			hasBiometrics = StringUtils.isNotEmpty(bioField);
+		}
 
-		if (StringUtils.isNotEmpty(bioField) && isValidCbeff(object)) {
+		if (hasBiometrics && isValidCbeff(object)) {
 			object.setIsValid(Boolean.TRUE);
 			registrationStatusDto.setStatusCode(RegistrationStatusCode.PROCESSING.toString());
 			registrationStatusDto.setStatusComment(StatusUtil.BIO_DEDUPE_INPROGRESS.getMessage());

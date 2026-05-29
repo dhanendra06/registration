@@ -185,6 +185,9 @@ public class BioDedupeProcessorTest {
 	@Mock
 	private PriorityBasedPacketManagerService priorityBasedPacketManagerService;
 
+	@Mock
+	private io.mosip.registration.processor.packet.manager.idreposervice.IdrepoDraftService idrepoDraftService;
+
 	/**
 	 * Sets the up.
 	 *

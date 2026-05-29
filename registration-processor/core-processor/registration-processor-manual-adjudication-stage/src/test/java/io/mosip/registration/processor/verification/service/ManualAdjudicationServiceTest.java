@@ -85,7 +85,9 @@ import io.mosip.registration.processor.core.spi.queue.MosipQueueManager;
 import io.mosip.registration.processor.core.spi.restclient.RegistrationProcessorRestClientService;
 import io.mosip.registration.processor.core.util.JsonUtil;
 import io.mosip.registration.processor.core.util.RegistrationExceptionMapperUtil;
+import io.mosip.registration.processor.packet.manager.dto.ResponseDTO;
 import io.mosip.registration.processor.packet.manager.idreposervice.IdRepoService;
+import io.mosip.registration.processor.packet.manager.idreposervice.IdrepoDraftService;
 import io.mosip.registration.processor.packet.storage.dto.ApplicantInfoDto;
 import io.mosip.registration.processor.packet.storage.dto.Document;
 import io.mosip.registration.processor.packet.storage.entity.ManualVerificationEntity;
@@ -119,8 +121,11 @@ public class ManualAdjudicationServiceTest {
 	@Mock
     ManualAdjudicationStage manualAdjudicationStage;
 	
-	@Mock 
+	@Mock
 	private IdRepoService idRepoService;
+
+	@Mock
+	private IdrepoDraftService idrepoDraftService;
 
 	@Mock
 	ManualAdjudicationService mockManualAdjudicationService;
@@ -188,7 +193,7 @@ public class ManualAdjudicationServiceTest {
 
 
 	@Before
-	public void setup() throws SecurityException, IllegalArgumentException {
+	public void setup() throws Exception {
 
 		queue=new MosipQueue() {
 			
@@ -282,6 +287,8 @@ public class ManualAdjudicationServiceTest {
 		Mockito.doNothing().when(manualVerificationUpdateUtility).updateManualVerificationEntityRID(any(), any());
 
 		Mockito.doNothing().when(manualVerificationUpdateUtility).updateManualVerificationEntityRID(any(), any());
+
+		Mockito.when(idrepoDraftService.idrepoGetDraft(anyString())).thenReturn(new ResponseDTO());
 
 	}
 
@@ -809,7 +816,7 @@ public class ManualAdjudicationServiceTest {
 		object.setIteration(1);
 		object.setWorkflowInstanceId("26fa3eff-f3b9-48f7-b365-d7f7c2e56e00");
 		setDataShareDetails();
-		Mockito.when(packetManagerService.getFields(anyString(), any(), anyString(), any())).thenThrow(new PacketManagerNonRecoverableException("errorCode","message"));
+		Mockito.when(idrepoDraftService.idrepoGetDraft(anyString())).thenThrow(new io.mosip.registration.processor.core.exception.ApisResourceAccessException("Draft API unavailable"));
 		Mockito.when(mapper.writeValueAsString(any())).thenReturn("");
 		Mockito.when(mapper.readValue(anyString(),any(Class.class))).thenReturn(shareableAttributes1).thenReturn(shareableAttributes1).thenReturn(shareableAttributes1);
 		MessageDTO messageDTO=manualAdjudicationService.process(object,queue);

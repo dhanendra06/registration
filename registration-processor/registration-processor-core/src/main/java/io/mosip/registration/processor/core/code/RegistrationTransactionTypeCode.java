@@ -49,6 +49,9 @@ public enum RegistrationTransactionTypeCode {
 	/** The reprocess. */
 	PACKET_REPROCESS,
 
+	/** The create draft. */
+	CREATE_DRAFT,
+
 	/** The Quality Classifier. */
 	QUALITY_CLASSIFIER,
 

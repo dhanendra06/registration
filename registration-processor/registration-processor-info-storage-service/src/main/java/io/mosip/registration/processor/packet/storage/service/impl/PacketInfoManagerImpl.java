@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -67,6 +68,9 @@ import io.mosip.registration.processor.packet.storage.exception.TablenotAccessib
 import io.mosip.registration.processor.packet.storage.exception.UnableToInsertData;
 import io.mosip.registration.processor.packet.storage.mapper.PacketInfoMapper;
 import io.mosip.registration.processor.packet.storage.repository.BasePacketRepository;
+import io.mosip.registration.processor.packet.manager.dto.ResponseDTO;
+import io.mosip.registration.processor.packet.manager.exception.IdrepoDraftException;
+import io.mosip.registration.processor.packet.manager.idreposervice.IdrepoDraftService;
 import io.mosip.registration.processor.packet.storage.utils.PriorityBasedPacketManagerService;
 import io.mosip.registration.processor.packet.storage.utils.Utilities;
 import io.mosip.registration.processor.rest.client.audit.builder.AuditLogRequestBuilder;
@@ -134,6 +138,9 @@ public class PacketInfoManagerImpl implements PacketInfoManager<Identity, Applic
 
 	@Autowired
 	private ObjectMapper objectMapper;
+
+	@Autowired
+	private IdrepoDraftService idrepoDraftService;
 
 	@Autowired
 	private PriorityBasedPacketManagerService packetManagerService;
@@ -234,7 +241,26 @@ public class PacketInfoManagerImpl implements PacketInfoManager<Identity, Applic
 			fields.add(email);
 			fields.add(phone);
 
-			Map<String, String> fieldMap = packetManagerService.getFields(registrationId, fields, process, stageName);
+			Map<String, String> fieldMap;
+			try {
+				ResponseDTO draftResponse = idrepoDraftService.idrepoGetDraft(registrationId, "demographics");
+				fieldMap = new HashMap<>();
+				if (draftResponse != null && draftResponse.getIdentity() != null) {
+					String draftIdentityJson = objectMapper.writeValueAsString(draftResponse.getIdentity());
+					JSONObject draftIdentityObj = objectMapper.readValue(draftIdentityJson, JSONObject.class);
+					for (String field : fields) {
+						Object fieldValue = draftIdentityObj.get(field);
+						if (fieldValue != null) {
+							fieldMap.put(field, objectMapper.writeValueAsString(fieldValue));
+						}
+					}
+				}
+			} catch (Exception draftEx) {
+				regProcLogger.warn(LoggerFileConstant.SESSIONID.toString(),
+						LoggerFileConstant.REGISTRATIONID.toString(), registrationId,
+						"Draft API failed for demographics, falling back to Packet Manager: " + draftEx.getMessage());
+				fieldMap = packetManagerService.getFields(registrationId, fields, process, stageName);
+			}
 
 
 			String[] names = ((String) JsonUtil.getJSONValue(JsonUtil.getJSONObject(regProcessorIdentityJson, MappingJsonConstants.NAME),

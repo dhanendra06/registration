@@ -140,5 +140,10 @@ public final class StatusConstants {
 
 	public static final String VERIFICATION_STAGE = RPR_REGISTRATION_PROCESSOR_PREFIX + "VER-";
 
+	// Create Draft stage
+	public static final String CREATE_DRAFT_MODULE = RPR_REGISTRATION_PROCESSOR_PREFIX + "CDS-";
+	public static final String CREATE_DRAFT_MODULE_SUCCESS = CREATE_DRAFT_MODULE + SUCCESS;
+	public static final String CREATE_DRAFT_MODULE_FAILED = CREATE_DRAFT_MODULE + FAILED;
+
 
 }

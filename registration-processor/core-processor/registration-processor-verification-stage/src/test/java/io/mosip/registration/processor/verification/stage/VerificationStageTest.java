@@ -16,6 +16,7 @@ import java.util.List;
 import io.mosip.kernel.core.util.DateUtils2;
 import org.apache.activemq.command.ActiveMQBytesMessage;
 import org.apache.activemq.util.ByteSequence;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -111,6 +112,13 @@ public class VerificationStageTest {
 			return 8080;
 		}
 	};
+	@After
+	public void tearDown() {
+		ch.qos.logback.classic.Logger root = (ch.qos.logback.classic.Logger) LoggerFactory
+				.getLogger(ch.qos.logback.classic.Logger.ROOT_LOGGER_NAME);
+		root.detachAppender("MOCK");
+	}
+
 	@Before
 	public void setUp() throws java.io.IOException, ApisResourceAccessException, PacketManagerException, JsonProcessingException {
 		ReflectionTestUtils.setField(verificationstage, "mosipConnectionFactory", mosipConnectionFactory);
@@ -169,31 +177,35 @@ public class VerificationStageTest {
 		when(mockAppender.getName()).thenReturn("MOCK");
 		root.addAppender(mockAppender);
 
-		VerificationResponseDTO resp = new VerificationResponseDTO();
-		resp.setId("verification");
-		resp.setRequestId("e2e59a9b-ce7c-41ae-a953-effb854d1205");
-		resp.setResponsetime(DateUtils2.getCurrentDateTimeString());
-		resp.setReturnValue(1);
+		try {
+			VerificationResponseDTO resp = new VerificationResponseDTO();
+			resp.setId("verification");
+			resp.setRequestId("e2e59a9b-ce7c-41ae-a953-effb854d1205");
+			resp.setResponsetime(DateUtils2.getCurrentDateTimeString());
+			resp.setReturnValue(1);
 
-		String response = JsonUtils.javaObjectToJsonString(resp);
+			String response = JsonUtils.javaObjectToJsonString(resp);
 
-		ActiveMQBytesMessage amq = new ActiveMQBytesMessage();
-		ByteSequence byteSeq = new ByteSequence();
-		byteSeq.setData(response.getBytes());
-		amq.setContent(byteSeq);
+			ActiveMQBytesMessage amq = new ActiveMQBytesMessage();
+			ByteSequence byteSeq = new ByteSequence();
+			byteSeq.setData(response.getBytes());
+			amq.setContent(byteSeq);
 
-		Mockito.when(verificationService.updatePacketStatus(any(), any(), any())).thenReturn(true);
+			Mockito.when(verificationService.updatePacketStatus(any(), any(), any())).thenReturn(true);
 
-		verificationstage.consumerListener(amq);
+			verificationstage.consumerListener(amq);
 
-		verify(mockAppender).doAppend(argThat(new ArgumentMatcher<ILoggingEvent>() {
+			verify(mockAppender).doAppend(argThat(new ArgumentMatcher<ILoggingEvent>() {
 
-			@Override
-			public boolean matches(ILoggingEvent argument) {
-				return ((LoggingEvent) argument).getFormattedMessage()
-						.contains("ManualVerificationStage::processDecision::success");
-			}
-		}));
+				@Override
+				public boolean matches(ILoggingEvent argument) {
+					return ((LoggingEvent) argument).getFormattedMessage()
+							.contains("ManualVerificationStage::processDecision::success");
+				}
+			}));
+		} finally {
+			root.detachAppender(mockAppender);
+		}
 	}
 
 }

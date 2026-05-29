@@ -72,6 +72,10 @@ import io.mosip.registration.processor.packet.storage.dto.ApplicantInfoDto;
 import io.mosip.registration.processor.packet.storage.dto.Document;
 import io.mosip.registration.processor.packet.storage.entity.VerificationEntity;
 import io.mosip.registration.processor.packet.storage.repository.BasePacketRepository;
+import io.mosip.registration.processor.core.idrepo.dto.Documents;
+import io.mosip.registration.processor.core.idrepo.dto.ResponseDTO;
+import io.mosip.registration.processor.packet.manager.exception.IdrepoDraftException;
+import io.mosip.registration.processor.packet.manager.idreposervice.IdrepoDraftService;
 import io.mosip.registration.processor.packet.storage.utils.PriorityBasedPacketManagerService;
 import io.mosip.registration.processor.packet.storage.utils.Utilities;
 import io.mosip.registration.processor.rest.client.audit.builder.AuditLogRequestBuilder;
@@ -158,6 +162,9 @@ public class VerificationServiceImpl implements VerificationService {
 
 	@Autowired
 	private MosipQueueManager<MosipQueue, byte[]> mosipQueueManager;
+
+	@Autowired
+	private IdrepoDraftService idrepoDraftService;
 
 	@Autowired
 	private PriorityBasedPacketManagerService packetManagerService;
@@ -473,14 +480,23 @@ public class VerificationServiceImpl implements VerificationService {
 
 		Map<String, String> policyMap = getPolicyMap(policy);
 
-		// set demographic
+		// set demographic from Draft API
 		Map<String, String> demographicMap = policyMap.entrySet().stream()
 				.filter(e -> e.getValue() != null
 						&& (!META_INFO.equalsIgnoreCase(e.getValue()) && !AUDITS.equalsIgnoreCase(e.getValue())))
 				.collect(Collectors.toMap(e -> e.getKey(), e -> e.getValue()));
-		requestDto.setIdentity(
-				packetManagerService.getFields(id, demographicMap.values().stream().collect(Collectors.toList()),
-						process, ProviderStageName.VERIFICATION));
+		io.mosip.registration.processor.packet.manager.dto.ResponseDTO draftResponse = idrepoDraftService.idrepoGetDraft(id);
+		String identityResponse = (draftResponse != null && draftResponse.getIdentity() != null)
+				? mapper.writeValueAsString(draftResponse.getIdentity()) : null;
+		Map<String, String> identityMap = new HashMap<>();
+		if (identityResponse != null && !identityResponse.isEmpty() && !"null".equals(identityResponse)) {
+			for (Map.Entry<String, String> demoEntry : demographicMap.entrySet()) {
+				JSONObject identityJson = JsonUtil.objectMapperReadValue(identityResponse, JSONObject.class);
+				identityMap.put(demoEntry.getValue(),
+						mapper.writeValueAsString(JsonUtil.getJSONValue(identityJson, demoEntry.getValue())));
+			}
+		}
+		requestDto.setIdentity(identityMap);
 
 		// set documents
 		JSONObject docJson = utility.getRegistrationProcessorMappingJson(MappingJsonConstants.DOCUMENT);
@@ -518,19 +534,20 @@ public class VerificationServiceImpl implements VerificationService {
 			requestDto.setMetaInfo(JsonUtils.javaObjectToJsonString(
 					packetManagerService.getMetaInfo(id, process, ProviderStageName.VERIFICATION)));
 
-		// set biometrics
+		// set biometrics from Draft API
 		JSONObject regProcessorIdentityJson = utility
 				.getRegistrationProcessorMappingJson(MappingJsonConstants.IDENTITY);
 		String individualBiometricsLabel = JsonUtil.getJSONValue(
 				JsonUtil.getJSONObject(regProcessorIdentityJson, MappingJsonConstants.INDIVIDUAL_BIOMETRICS),
 				MappingJsonConstants.VALUE);
 
-		if (policyMap.containsValue(individualBiometricsLabel)) {
-			List<String> modalities = getModalities(policy);
-			BiometricRecord biometricRecord = packetManagerService.getBiometrics(id, individualBiometricsLabel,
-					modalities, process, ProviderStageName.VERIFICATION);
-			byte[] content = cbeffutil.createXML(biometricRecord.getSegments());
-			requestDto.setBiometrics(content != null ? CryptoUtil.encodeToURLSafeBase64(content) : null);
+		if (policyMap.containsValue(individualBiometricsLabel) && draftResponse != null && draftResponse.getDocuments() != null) {
+			for (Documents doc : draftResponse.getDocuments()) {
+				if (doc.getCategory().equalsIgnoreCase(individualBiometricsLabel)) {
+					requestDto.setBiometrics(doc.getValue());
+					break;
+				}
+			}
 		}
 
 		String req = JsonUtils.javaObjectToJsonString(requestDto);

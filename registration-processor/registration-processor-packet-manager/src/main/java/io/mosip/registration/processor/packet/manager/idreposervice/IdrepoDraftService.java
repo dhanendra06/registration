@@ -2,9 +2,8 @@ package io.mosip.registration.processor.packet.manager.idreposervice;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
-
-import org.assertj.core.util.Lists;
 import org.json.simple.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -48,7 +47,7 @@ public class IdrepoDraftService {
         regProcLogger.debug("idrepoHasDraft entry " + id);
 
         Integer result = registrationProcessorRestClientService.headApi
-                (ApiName.IDREPOHASDRAFT, Lists.newArrayList(id), null, null);
+                (ApiName.IDREPOHASDRAFT, Collections.singletonList(id), null, null);
 
         if (result == null || (result.intValue() != IDREPO_DRAFT_FOUND && result.intValue() != IDREPO_DRAFT_NOT_FOUND)) {
             regProcLogger.error("idrepoHasDraft failed to get result for id " + id + " result received is " + result);
@@ -61,17 +60,35 @@ public class IdrepoDraftService {
     }
 
     public ResponseDTO idrepoGetDraft(String id) throws ApisResourceAccessException, IdrepoDraftException {
-        regProcLogger.debug("idrepoGetDraft entry " + id);
-        IdResponseDTO idResponseDTO = (IdResponseDTO) registrationProcessorRestClientService.getApi(
-                ApiName.IDREPOGETDRAFT, Lists.newArrayList(id), Lists.emptyList(), null, IdResponseDTO.class);
+        return idrepoGetDraft(id, null);
+    }
+
+    /**
+     * Retrieves a draft from ID Repository with granular data filtering.
+     *
+     * @param id   the registration ID
+     * @param type optional filter: {@code "demographics"}, {@code "biometrics"},
+     *             {@code "all"}, or {@code null} (returns all data by default)
+     * @return the draft response DTO
+     */
+    public ResponseDTO idrepoGetDraft(String id, String type) throws ApisResourceAccessException, IdrepoDraftException {
+        regProcLogger.debug("idrepoGetDraft entry " + id + " type=" + type);
+        IdResponseDTO idResponseDTO;
+        if (type != null && !type.isEmpty()) {
+            idResponseDTO = (IdResponseDTO) registrationProcessorRestClientService.getApi(
+                    ApiName.IDREPOGETDRAFT, Collections.singletonList(id), "type", type, IdResponseDTO.class);
+        } else {
+            idResponseDTO = (IdResponseDTO) registrationProcessorRestClientService.getApi(
+                    ApiName.IDREPOGETDRAFT, Collections.singletonList(id), Collections.emptyList(), null, IdResponseDTO.class);
+        }
         if (idResponseDTO.getErrors() != null && !idResponseDTO.getErrors().isEmpty()) {
             ErrorDTO error = idResponseDTO.getErrors().get(0);
             regProcLogger.error("Error occured while getting draft for id : " + id, error.toString());
             throw new IdrepoDraftException(error.getErrorCode(), error.getMessage());
         }
-            regProcLogger.debug("idrepoGetDraft exit " + id);
-            return idResponseDTO.getResponse();
-        }
+        regProcLogger.debug("idrepoGetDraft exit " + id);
+        return idResponseDTO.getResponse();
+    }
 
 
     public boolean idrepoCreateDraft(String id, String uin) throws ApisResourceAccessException, IdrepoDraftException {
@@ -80,7 +97,7 @@ public class IdrepoDraftService {
         String queryParamValue = uin != null ? uin : null;
 
         ResponseWrapper response = (ResponseWrapper) registrationProcessorRestClientService.postApi(
-                ApiName.IDREPOCREATEDRAFT, Lists.newArrayList(id), queryParam, queryParamValue, null, ResponseWrapper.class);
+                ApiName.IDREPOCREATEDRAFT, Collections.singletonList(id), queryParam, queryParamValue, null, ResponseWrapper.class);
         if (response.getErrors() != null && !response.getErrors().isEmpty())
         {
             List<ErrorDTO> error=response.getErrors();
@@ -113,7 +130,7 @@ public class IdrepoDraftService {
             idRequestDto.setRequest(requestDto);
         }
         IdResponseDTO response = (IdResponseDTO) registrationProcessorRestClientService.patchApi(
-                    ApiName.IDREPOUPDATEDRAFT, Lists.newArrayList(id), null, null, idRequestDto, IdResponseDTO.class);
+                    ApiName.IDREPOUPDATEDRAFT, Collections.singletonList(id), null, null, idRequestDto, IdResponseDTO.class);
             if (response.getErrors() != null && !response.getErrors().isEmpty()) {
                 regProcLogger.info("Error while updating the drant " + id);
                 regProcLogger.info(id+" Discarding the draft because of "+response.getErrors().get(0).getMessage());

@@ -43,6 +43,7 @@ import io.mosip.kernel.biometrics.constant.BiometricType;
 import io.mosip.kernel.biometrics.entities.BIR;
 import io.mosip.kernel.biometrics.entities.BiometricRecord;
 import io.mosip.kernel.biometrics.spi.CbeffUtil;
+import io.mosip.kernel.core.util.CryptoUtil;
 import io.mosip.kernel.core.logger.spi.Logger;
 import io.mosip.kernel.core.util.JsonUtils;
 import io.mosip.kernel.core.util.StringUtils;
@@ -95,6 +96,10 @@ import io.mosip.registration.processor.core.status.util.StatusUtil;
 import io.mosip.registration.processor.core.status.util.TrimExceptionMessage;
 import io.mosip.registration.processor.core.util.JsonUtil;
 import io.mosip.registration.processor.packet.storage.dto.ApplicantInfoDto;
+import io.mosip.registration.processor.core.idrepo.dto.Documents;
+import io.mosip.registration.processor.core.idrepo.dto.ResponseDTO;
+import io.mosip.registration.processor.packet.manager.exception.IdrepoDraftException;
+import io.mosip.registration.processor.packet.manager.idreposervice.IdrepoDraftService;
 import io.mosip.registration.processor.packet.storage.utils.PacketManagerService;
 import io.mosip.registration.processor.packet.storage.utils.PriorityBasedPacketManagerService;
 import io.mosip.registration.processor.packet.storage.utils.Utilities;
@@ -198,6 +203,9 @@ public class AbisHandlerStage extends MosipVerticleAPIManager {
 
 	@Autowired
 	private Environment env;
+
+	@Autowired
+	private IdrepoDraftService idrepoDraftService;
 
 	@Autowired
 	private PriorityBasedPacketManagerService priorityBasedPacketManagerService;
@@ -598,8 +606,23 @@ public class AbisHandlerStage extends MosipVerticleAPIManager {
 		try {
 			CompletableFuture<BiometricRecord> biometricsFuture = CompletableFuture.supplyAsync(() -> {
 				try {
-					return priorityBasedPacketManagerService.getBiometrics(id, individualBiometricsLabel,
-							policyTypeAndSubTypeList, process, ProviderStageName.BIO_DEDUPE);
+					BiometricRecord record = new BiometricRecord();
+					io.mosip.registration.processor.packet.manager.dto.ResponseDTO draftBioResponse =
+							idrepoDraftService.idrepoGetDraft(id, "biometrics");
+					if (draftBioResponse != null && draftBioResponse.getDocuments() != null) {
+						for (Documents doc : draftBioResponse.getDocuments()) {
+							if (doc.getCategory().equalsIgnoreCase(individualBiometricsLabel) && doc.getValue() != null) {
+								byte[] cbeffBytes = CryptoUtil.decodeURLSafeBase64(doc.getValue());
+								record.setSegments(cbeffutil.getBIRDataFromXML(cbeffBytes));
+								break;
+							}
+						}
+					}
+					if (record.getSegments() == null || record.getSegments().isEmpty()) {
+						record = priorityBasedPacketManagerService.getBiometrics(id, individualBiometricsLabel,
+								policyTypeAndSubTypeList, process, ProviderStageName.BIO_DEDUPE);
+					}
+					return record;
 				} catch (Exception e) { throw new CompletionException(e); }
 			}, executor);
 
@@ -627,7 +650,6 @@ public class AbisHandlerStage extends MosipVerticleAPIManager {
 		} finally {
 			executor.close();
 		}
-
 		String ageGroup = tags.get("AGE_GROUP");
 		Map<String, List<String>> ageGroupModalitySegmentMap;
 		if(biometricModalitySegmentsMapforAgeGroup.containsKey(ageGroup)){

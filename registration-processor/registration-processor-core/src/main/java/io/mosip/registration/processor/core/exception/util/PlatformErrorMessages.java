@@ -1199,6 +1199,16 @@ public enum PlatformErrorMessages {
 
 	DRAFT_CHECK_FAILED(PlatformConstants.RPR_UIN_GENERATOR_STAGE + "015", "Could not check if draft is present or not"),
 
+	/** Create draft stage failures. */
+	RPR_CDS_UIN_ALLOCATION_FAILED(PlatformConstants.RPR_CREATE_DRAFT_STAGE + "001",
+			"Failed to allocate UIN during draft creation"),
+
+	RPR_CDS_DRAFT_CREATION_FAILED(PlatformConstants.RPR_CREATE_DRAFT_STAGE + "002",
+			"Failed to create draft in ID Repository"),
+
+	RPR_CDS_UIN_NOT_FOUND_FOR_UPDATE(PlatformConstants.RPR_CREATE_DRAFT_STAGE + "003",
+			"UIN not found for UPDATE packet during draft creation"),
+
 	/** The rpr pgs file not present. */
 	RPR_PGS_FILE_NOT_PRESENT(PlatformConstants.RPR_PACKET_GENERATOR_MODULE + "001",
 			"The Packet store set by the System is not accessible"),

@@ -73,6 +73,8 @@ import io.mosip.registration.processor.packet.storage.dto.ApplicantInfoDto;
 import io.mosip.registration.processor.packet.storage.entity.VerificationEntity;
 import io.mosip.registration.processor.packet.storage.entity.VerificationPKEntity;
 import io.mosip.registration.processor.packet.storage.repository.BasePacketRepository;
+import io.mosip.registration.processor.packet.manager.dto.ResponseDTO;
+import io.mosip.registration.processor.packet.manager.idreposervice.IdrepoDraftService;
 import io.mosip.registration.processor.packet.storage.utils.PriorityBasedPacketManagerService;
 import io.mosip.registration.processor.packet.storage.utils.Utilities;
 import io.mosip.registration.processor.rest.client.audit.builder.AuditLogRequestBuilder;
@@ -91,7 +93,8 @@ import io.mosip.registration.processor.verification.stage.VerificationStage;
 import io.mosip.registration.processor.verification.util.SaveVerificationRecordUtility;
 
 @RunWith(PowerMockRunner.class)
-@PowerMockIgnore({ "com.sun.org.apache.xerces.*", "javax.xml.*", "org.xml.*","javax.management.*", "javax.net.ssl.*" })
+@PowerMockIgnore({ "com.sun.org.apache.xerces.*", "javax.xml.*", "org.xml.*","javax.management.*", "javax.net.ssl.*",
+		"com.fasterxml.jackson.*", "io.mosip.registration.processor.verification.response.dto.*" })
 public class VerificationServiceTest {
 
 	private static final String STAGE_NAME = "VerificationStage";
@@ -144,6 +147,9 @@ public class VerificationServiceTest {
 
 	@Mock
 	SaveVerificationRecordUtility saveVerificationRecordUtility;
+
+	@Mock
+	private IdrepoDraftService idrepoDraftService;
 
 	private InternalRegistrationStatusDto registrationStatusDto;
 	private VerificationPKEntity PKId;
@@ -385,7 +391,8 @@ public class VerificationServiceTest {
 				eq(ResponseWrapper.class))).thenReturn(policiesResponse);
 
 		Mockito.when(basePacketRepository.getVerificationRecordByRequestId(resp.getRequestId())).thenReturn(entities);
-		
+		Mockito.when(idrepoDraftService.idrepoGetDraft(anyString())).thenReturn(new ResponseDTO());
+
 	}
 
 	@Test

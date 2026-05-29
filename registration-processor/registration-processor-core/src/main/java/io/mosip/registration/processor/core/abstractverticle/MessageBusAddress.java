@@ -232,6 +232,12 @@ public class MessageBusAddress implements Serializable {
 	/** The Constant BIOMETRIC_AUTHENTICATION_BUS_OUT. */
 	public static final MessageBusAddress BIOMETRIC_AUTHENTICATION_BUS_OUT = new MessageBusAddress("biometric-authentication-bus-out");
 
+	/** The Constant CREATE_DRAFT_BUS_IN. */
+	public static final MessageBusAddress CREATE_DRAFT_BUS_IN = new MessageBusAddress("create-draft-bus-in");
+
+	/** The Constant CREATE_DRAFT_BUS_OUT. */
+	public static final MessageBusAddress CREATE_DRAFT_BUS_OUT = new MessageBusAddress("create-draft-bus-out");
+
 	/** The Constant QUALITY_CLASSIFIER_BUS_IN. */
 	public static final MessageBusAddress QUALITY_CLASSIFIER_BUS_IN = new MessageBusAddress("quality-classifier-bus-in");
 

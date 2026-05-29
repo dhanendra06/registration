@@ -273,6 +273,59 @@ public class IdrepoDraftServiceTest {
 
 	}
     @Test
+    public void idrepoGetDraftWithTypeDemographicsTest() throws ApisResourceAccessException, IdrepoDraftException {
+
+        when(registrationProcessorRestClientService.getApi(
+                ApiName.IDREPOGETDRAFT, Lists.newArrayList(ID), "type", "demographics", IdResponseDTO.class))
+                .thenReturn(idResponseDTO);
+
+        ResponseDTO result = idrepoDraftService.idrepoGetDraft(ID, "demographics");
+
+        assertTrue(result.getRegistrationId().equals(ID));
+        assertTrue(result.getStatus().equals("ACTIVATED"));
+    }
+
+    @Test
+    public void idrepoGetDraftWithTypeBiometricsTest() throws ApisResourceAccessException, IdrepoDraftException {
+
+        when(registrationProcessorRestClientService.getApi(
+                ApiName.IDREPOGETDRAFT, Lists.newArrayList(ID), "type", "biometrics", IdResponseDTO.class))
+                .thenReturn(idResponseDTO);
+
+        ResponseDTO result = idrepoDraftService.idrepoGetDraft(ID, "biometrics");
+
+        assertTrue(result.getRegistrationId().equals(ID));
+    }
+
+    @Test(expected = IdrepoDraftException.class)
+    public void idrepoGetDraftWithTypeErrorTest() throws ApisResourceAccessException, IdrepoDraftException {
+
+        ErrorDTO errorDTO = new ErrorDTO();
+        errorDTO.setMessage("Draft not found");
+        errorDTO.setErrorCode("IDR-IDS-002");
+        IdResponseDTO errorResponse = new IdResponseDTO();
+        errorResponse.setErrors(Lists.newArrayList(errorDTO));
+
+        when(registrationProcessorRestClientService.getApi(
+                ApiName.IDREPOGETDRAFT, Lists.newArrayList(ID), "type", "demographics", IdResponseDTO.class))
+                .thenReturn(errorResponse);
+
+        idrepoDraftService.idrepoGetDraft(ID, "demographics");
+    }
+
+    @Test
+    public void idrepoGetDraftWithNullTypeCallsNoTypeOverloadTest() throws ApisResourceAccessException, IdrepoDraftException {
+
+        when(registrationProcessorRestClientService.getApi(
+                ApiName.IDREPOGETDRAFT, Lists.newArrayList(ID), Lists.emptyList(), null, IdResponseDTO.class))
+                .thenReturn(idResponseDTO);
+
+        ResponseDTO result = idrepoDraftService.idrepoGetDraft(ID, null);
+
+        assertTrue(result.getRegistrationId().equals(ID));
+    }
+
+    @Test
     public void discardDraftSuccessTest() throws IdrepoDraftReprocessableException, IdrepoDraftException, ApisResourceAccessException {
         ResponseDTO discardresponseDTO = new ResponseDTO();
         discardresponseDTO.setStatus("Drafted");

@@ -93,6 +93,8 @@ import io.mosip.registration.processor.core.status.util.StatusUtil;
 import io.mosip.registration.processor.core.status.util.TrimExceptionMessage;
 import io.mosip.registration.processor.core.util.JsonUtil;
 import io.mosip.registration.processor.core.util.RegistrationExceptionMapperUtil;
+import io.mosip.registration.processor.packet.manager.exception.IdrepoDraftException;
+import io.mosip.registration.processor.packet.manager.idreposervice.IdrepoDraftService;
 import io.mosip.registration.processor.packet.manager.idreposervice.IdRepoService;
 import io.mosip.registration.processor.packet.storage.dto.ApplicantInfoDto;
 import io.mosip.registration.processor.packet.storage.dto.Document;
@@ -174,6 +176,9 @@ public class ManualAdjudicationServiceImpl implements ManualAdjudicationService 
 
 	@Autowired
 	private IdRepoService idRepoService;
+
+	@Autowired
+	private IdrepoDraftService idrepoDraftService;
 
 	@Autowired
 	private MosipQueueManager<MosipQueue, byte[]> mosipQueueManager;
@@ -420,35 +425,44 @@ public class ManualAdjudicationServiceImpl implements ManualAdjudicationService 
 
 		Map<String, String> policyMap = getPolicyMap(policy);
 
-		// set demographic
+		// set demographic and biometrics from Draft API
 		Map<String, String> demographicMap = getDemographicMap(policyMap);
-		requestDto.setIdentity(packetManagerService.getFields(id, demographicMap.values().stream().collect(Collectors.toList()), process, ProviderStageName.MANUAL_ADJUDICATION));
+		io.mosip.registration.processor.packet.manager.dto.ResponseDTO draftResponse = idrepoDraftService.idrepoGetDraft(id);
+		String identityResponse = mapper.writeValueAsString(draftResponse.getIdentity());
+		Map<String, String> identityMap = new HashMap<>();
+		if (identityResponse != null && !identityResponse.isEmpty()) {
+			JSONObject identityJson = JsonUtil.objectMapperReadValue(identityResponse, JSONObject.class);
+			for (Entry<String, String> demoEntry : demographicMap.entrySet()) {
+				identityMap.put(demoEntry.getValue(),
+						mapper.writeValueAsString(JsonUtil.getJSONValue(identityJson, demoEntry.getValue())));
+			}
+		}
+		requestDto.setIdentity(identityMap);
 
-		// set documents
+		// set documents (evidence files remain from packet manager)
 		requestDto=setDocuments(policyMap, requestDto, id, process, null);
 
-		// set audits
+		// set audits and metainfo (not in draft, use packet manager)
 		for(Entry<String,String> entry: policyMap.entrySet()) {
 			if (entry.getValue().contains(AUDITS))
 				requestDto.setAudits(JsonUtils.javaObjectToJsonString(packetManagerService.getAudits(id, process, ProviderStageName.MANUAL_ADJUDICATION)));
 
-			// set metainfo
 			if (entry.getValue().contains(META_INFO))
 				requestDto.setMetaInfo(JsonUtils.javaObjectToJsonString(packetManagerService.getMetaInfo(id, process, ProviderStageName.MANUAL_ADJUDICATION)));
 
-
-			// set biometrics
+			// set biometrics from draft documents
 			JSONObject regProcessorIdentityJson = utilities.getRegistrationProcessorMappingJson(MappingJsonConstants.IDENTITY);
 			String individualBiometricsLabel = JsonUtil.getJSONValue(
 					JsonUtil.getJSONObject(regProcessorIdentityJson, MappingJsonConstants.INDIVIDUAL_BIOMETRICS),
 					MappingJsonConstants.VALUE);
 
-			if (entry.getValue().contains(individualBiometricsLabel)) {
-				List<String> modalities = getModalities(policy);
-				BiometricRecord biometricRecord = packetManagerService.getBiometrics(
-						id, individualBiometricsLabel, modalities, process, ProviderStageName.MANUAL_ADJUDICATION);
-				byte[] content = cbeffutil.createXML(biometricRecord.getSegments());
-				requestDto.setBiometrics(content != null ? CryptoUtil.encodeToURLSafeBase64(content) : null);
+			if (entry.getValue().contains(individualBiometricsLabel) && draftResponse.getDocuments() != null) {
+				for (Documents doc : draftResponse.getDocuments()) {
+					if (doc.getCategory().equalsIgnoreCase(individualBiometricsLabel)) {
+						requestDto.setBiometrics(doc.getValue());
+						break;
+					}
+				}
 			}
 		}
 

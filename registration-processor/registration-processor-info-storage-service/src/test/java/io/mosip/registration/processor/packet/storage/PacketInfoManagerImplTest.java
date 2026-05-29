@@ -2,6 +2,7 @@
 package io.mosip.registration.processor.packet.storage;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -171,6 +172,9 @@ public class PacketInfoManagerImplTest {
 
 	@Mock
 	private PriorityBasedPacketManagerService packetManagerService;
+
+	@Mock
+	private io.mosip.registration.processor.packet.manager.idreposervice.IdrepoDraftService idrepoDraftService;
 
 	@Mock
 	private ObjectMapper objectMapper;
@@ -629,6 +633,8 @@ public class PacketInfoManagerImplTest {
 	
 	@Test(expected = ParsingException.class)
 	public void demographicDedupeParsingExceptionTest() throws Exception {
+		Mockito.when(idrepoDraftService.idrepoGetDraft(anyString(), anyString()))
+				.thenThrow(new io.mosip.registration.processor.core.exception.ApisResourceAccessException("Draft API unavailable"));
 		Mockito.when(packetManagerService.getFields(anyString(), any(), anyString(), any()))
 				.thenThrow(new JsonProcessingException("exception occured"));
 		packetInfoManagerImpl.saveDemographicInfoJson("2018782130000224092018121229",
@@ -1149,6 +1155,19 @@ public class PacketInfoManagerImplTest {
 
 		packetInfoManagerImpl.saveRegLostUinDet("123", "","456", "", "");
 
+	}
+
+	@Test
+	public void getIdentityKeysAndFetchValuesFromJSON_FallsBackToPacketManager_WhenDraftApiFails() throws Exception {
+		Mockito.when(idrepoDraftService.idrepoGetDraft(anyString(), anyString()))
+				.thenThrow(new io.mosip.registration.processor.core.exception.ApisResourceAccessException("Draft API unavailable"));
+
+		IndividualDemographicDedupe result = packetInfoManagerImpl.getIdentityKeysAndFetchValuesFromJSON(
+				"10001100770000320200720095022", "NEW",
+				io.mosip.registration.processor.core.constant.ProviderStageName.DEMO_DEDUPE);
+
+		assertNotNull(result);
+		Mockito.verify(packetManagerService).getFields(any(), any(), any(), any());
 	}
 
 	@Test

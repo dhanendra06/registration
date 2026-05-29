@@ -2,6 +2,7 @@ package io.mosip.registration.processor.core.constant;
 
 public enum  ProviderStageName {
 
+    CREATE_DRAFT("createdraft"),
     PACKET_RECEIVER("packetreceiver"),
     PACKET_UPLOADER("packetuploader"),
     PACKET_VALIDATOR("packetvalidator"),

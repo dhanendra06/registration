@@ -31,6 +31,14 @@ public enum StatusUtil {
 	PACKET_RETRY_CNT_EXCEEDED(StatusConstants.PACKET_UPLOADER_MODULE_FAILED + "009",
 			"Retry count has exceeded the maximum limit specified"),
 
+	// Create Draft stage
+	CREATE_DRAFT_SUCCESS(StatusConstants.CREATE_DRAFT_MODULE_SUCCESS + "001", "Draft Created Successfully"),
+	CREATE_DRAFT_SKIPPED(StatusConstants.CREATE_DRAFT_MODULE_SUCCESS + "002",
+			"Create Draft Skipped for Non NEW/UPDATE Packet"),
+	CREATE_DRAFT_FAILED(StatusConstants.CREATE_DRAFT_MODULE_FAILED + "001", "Draft Creation Failed"),
+	UIN_ALLOCATION_FAILED(StatusConstants.CREATE_DRAFT_MODULE_FAILED + "002",
+			"UIN Allocation Failed During Draft Creation"),
+
 	// Quality checker stage
 	INDIVIDUAL_BIOMETRIC_NOT_FOUND(StatusConstants.QUALITY_CHECKER_MODULE_SUCCESS + "001",
 			"Individual Biometric Parameter Not Found in ID JSON so skipping biometric classification"),
