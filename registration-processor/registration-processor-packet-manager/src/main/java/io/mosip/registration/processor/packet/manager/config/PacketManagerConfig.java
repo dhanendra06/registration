@@ -11,8 +11,6 @@ import io.mosip.registration.processor.core.spi.filesystem.manager.FileManager;
 import io.mosip.registration.processor.packet.manager.decryptor.Decryptor;
 import io.mosip.registration.processor.packet.manager.decryptor.DecryptorImpl;
 import io.mosip.registration.processor.packet.manager.dto.DirectoryPathDto;
-import io.mosip.registration.processor.packet.manager.idreposervice.IdRepoService;
-import io.mosip.registration.processor.packet.manager.idreposervice.impl.IdRepoServiceImpl;
 import io.mosip.registration.processor.packet.manager.service.impl.FileManagerImpl;
 
 /**
@@ -30,12 +28,6 @@ public class PacketManagerConfig {
 	@Primary
 	public FileManager<DirectoryPathDto, InputStream> filemanager() {
 		return new FileManagerImpl();
-	}
-
-	@Bean
-	@Primary
-	public IdRepoService getIdRepoService() {
-		return new IdRepoServiceImpl();
 	}
 
     @Bean
