@@ -24,6 +24,7 @@ import io.mosip.registration.processor.rest.client.config.RestConfigBean;
 @ComponentScan( basePackages = { "io.mosip.registration.processor.notification.*",
 		"io.mosip.kernel.websub.api.*","${mosip.auth.adapter.impl.basepackage}", "io.mosip.registration.processor.message.sender.config",
 		"io.mosip.registration.processor.rest.client.*", "io.mosip.registration.processor.packet.storage.config",
+		"io.mosip.registration.processor.packet.manager.config",
 		"io.mosip.registration.processor.core.config", "io.mosip.registration.processor.packet.storage.dao",
 		"io.mosip.registration.processor.status.*",
 		"io.mosip.registration.processor.core.kernel.beans" }, excludeFilters = @Filter(type = FilterType.ASSIGNABLE_TYPE, value = {

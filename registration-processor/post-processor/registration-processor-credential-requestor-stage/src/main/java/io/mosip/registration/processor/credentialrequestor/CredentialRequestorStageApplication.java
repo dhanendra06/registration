@@ -16,7 +16,8 @@ public class CredentialRequestorStageApplication {
 				"io.mosip.registration.processor.rest.client.config",
 				"io.mosip.registration.processor.core.kernel.beans",
 				"io.mosip.registration.processor.status.config",
-				"io.mosip.registration.processor.packet.storage.config");
+				"io.mosip.registration.processor.packet.storage.config",
+				"io.mosip.registration.processor.packet.manager.config");
 		ctx.refresh();
 
 		CredentialRequestorStage printStage = ctx.getBean(CredentialRequestorStage.class);
