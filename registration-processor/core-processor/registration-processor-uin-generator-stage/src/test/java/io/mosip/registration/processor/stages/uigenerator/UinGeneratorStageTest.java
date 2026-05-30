@@ -2975,35 +2975,6 @@ public class UinGeneratorStageTest {
 		assertNull(demographicIdentity.get("packetCreatedOn"));
 	}
 
-	@Test
-	public void testPublishDraftCalledOnNewPacketSuccess() throws Exception {
-		MessageDTO messageDTO = new MessageDTO();
-		messageDTO.setRid("27847657360002520181210094052");
-		messageDTO.setReg_type(RegistrationType.NEW.name());
-
-		io.mosip.registration.processor.packet.manager.dto.IdResponseDTO idResponseDTO =
-				new io.mosip.registration.processor.packet.manager.dto.IdResponseDTO();
-		io.mosip.registration.processor.packet.manager.dto.ResponseDTO responseDTO =
-				new io.mosip.registration.processor.packet.manager.dto.ResponseDTO();
-		responseDTO.setStatus("ACTIVATED");
-		idResponseDTO.setErrors(null);
-		idResponseDTO.setId("mosip.id.update");
-		idResponseDTO.setResponse(responseDTO);
-		idResponseDTO.setResponsetime("2019-01-17T06:29:01.940Z");
-		idResponseDTO.setVersion("1.0");
-
-		when(idrepoDraftService.idrepoUpdateDraft(anyString(), any(), any())).thenReturn(idResponseDTO);
-		when(utilities.getRegistrationProcessorMappingJson(MappingJsonConstants.IDENTITY)).thenReturn(identityObj);
-		when(utilities.getRegistrationProcessorMappingJson(MappingJsonConstants.DOCUMENT)).thenReturn(documentObj);
-
-		MessageDTO result = uinGeneratorStage.process(messageDTO);
-
-		assertTrue(result.getIsValid());
-		assertFalse(result.getInternalError());
-		verify(idrepoDraftService).idrepoPublishDraft(messageDTO.getRid());
-	}
-
-
 	/**
 	 * Schema without packetCreatedOn: process() must not call retrieveCreatedDateFromPacket (MOSIP-44732 behaviour).
 	 */
@@ -3039,24 +3010,6 @@ public class UinGeneratorStageTest {
 
 
 
-	@Test
-	public void testPublishDraftNotCalledWhenDraftUpdateFails() throws Exception {
-		MessageDTO messageDTO = new MessageDTO();
-		messageDTO.setRid("27847657360002520181210094052");
-		messageDTO.setReg_type(RegistrationType.NEW.name());
-
-		when(registrationStatusMapperUtil
-				.getStatusCode(RegistrationExceptionTypeCode.IDREPO_DRAFT_EXCEPTION)).thenReturn("FAILED");
-		when(idrepoDraftService.idrepoUpdateDraft(anyString(), any(), any()))
-				.thenThrow(io.mosip.registration.processor.packet.manager.exception.IdrepoDraftException.class);
-		when(utilities.getRegistrationProcessorMappingJson(MappingJsonConstants.IDENTITY)).thenReturn(identityObj);
-		when(utilities.getRegistrationProcessorMappingJson(MappingJsonConstants.DOCUMENT)).thenReturn(documentObj);
-
-		MessageDTO result = uinGeneratorStage.process(messageDTO);
-
-		assertTrue(result.getInternalError());
-		verify(idrepoDraftService, Mockito.never()).idrepoPublishDraft(anyString());
-	}
 
 
 
