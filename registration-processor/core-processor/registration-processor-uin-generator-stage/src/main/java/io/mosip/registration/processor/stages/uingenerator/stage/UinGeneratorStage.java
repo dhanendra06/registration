@@ -276,7 +276,6 @@ public class UinGeneratorStage extends MosipVerticleAPIManager {
 						description.setMessage(PlatformSuccessMessages.RPR_UIN_GENERATOR_STAGE_SUCCESS.getMessage());
 						description.setCode(PlatformSuccessMessages.RPR_UIN_GENERATOR_STAGE_SUCCESS.getCode());
 						description.setTransactionStatusCode(RegistrationTransactionStatusCode.SUCCESS.toString());
-						idrepoDraftService.idrepoPublishDraft(registrationId);
 					} else {
 						List<ErrorDTO> errors = idResponseDTO != null ? idResponseDTO.getErrors() : null;
 						String statusComment = errors != null ? errors.get(0).getMessage()
@@ -680,7 +679,6 @@ public class UinGeneratorStage extends MosipVerticleAPIManager {
 						StatusUtil.UIN_DATA_UPDATION_SUCCESS.getMessage() + " for registration Id: " + regId);
 				description.setTransactionStatusCode(RegistrationTransactionStatusCode.PROCESSED.toString());
 				object.setIsValid(Boolean.TRUE);
-				idrepoDraftService.idrepoPublishDraft(regId);
 			}
 		} else {
 			String statusComment = result != null && result.getErrors() != null ? result.getErrors().get(0).getMessage()
@@ -813,7 +811,6 @@ public class UinGeneratorStage extends MosipVerticleAPIManager {
 						description.setCode(PlatformSuccessMessages.RPR_UIN_ACTIVATED_SUCCESS.getCode());
 						description.setTransactionStatusCode(RegistrationTransactionStatusCode.PROCESSED.toString());
 						object.setIsValid(Boolean.TRUE);
-						idrepoDraftService.idrepoPublishDraft(id);
 					} else {
 						description.setStatusCode(RegistrationStatusCode.PROCESSING.toString());
 						description.setStatusComment(StatusUtil.UIN_ACTIVATED_FAILED.getMessage());
@@ -942,7 +939,6 @@ public class UinGeneratorStage extends MosipVerticleAPIManager {
 					description.setTransactionStatusCode(RegistrationTransactionStatusCode.PROCESSED.toString());
 					object.setIsValid(Boolean.TRUE);
 					statusComment = idResponseDto.getResponse().getStatus().toString();
-					idrepoDraftService.idrepoPublishDraft(id);
 				}
 			} else {
 
@@ -1108,7 +1104,6 @@ public class UinGeneratorStage extends MosipVerticleAPIManager {
 				description.setMessage(UinStatusMessage.PACKET_LOST_UIN_UPDATION_SUCCESS_MSG + lostPacketRegId);
 				description.setTransactionStatusCode(RegistrationTransactionStatusCode.PROCESSED.toString());
 				object.setIsValid(Boolean.TRUE);
-				idrepoDraftService.idrepoPublishDraft(lostPacketRegId);
 				regProcLogger.info(LoggerFileConstant.SESSIONID.toString(),
 						LoggerFileConstant.REGISTRATIONID.toString() + lostPacketRegId,
 						" UIN LINKED WITH " + matchedRegId, "is : " + description);
