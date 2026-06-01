@@ -116,14 +116,23 @@ public class IdrepoDraftService {
         } else {
             regProcLogger.info("Existing draft found for id " + id + ". Updating uin in demographic identity.");
             ResponseDTO responseDTO = idrepoGetDraft(id);
+            RequestDto incoming = idRequestDto.getRequest();
             RequestDto requestDto = new RequestDto();
             requestDto.setAnonymousProfile(responseDTO.getAnonymousProfile());
             requestDto.setBiometricReferenceId(responseDTO.getBiometricReferenceId());
             JSONObject existingIdentity = mapper.readValue(mapper.writeValueAsString(responseDTO.getIdentity()), JSONObject.class);
-            JSONObject newIdentity = mapper.readValue(mapper.writeValueAsString(idRequestDto.getRequest().getIdentity()), JSONObject.class);
-            newIdentity.put(UIN, existingIdentity.get(UIN));
-//          setting the identity to request while updating the draft.
+            JSONObject newIdentity = mapper.readValue(mapper.writeValueAsString(incoming.getIdentity()), JSONObject.class);
+            // Preserve the existing UIN from the draft (it was allocated at create-time
+            // and must not be overwritten by the new identity payload).
+            if (existingIdentity != null && existingIdentity.get(UIN) != null) {
+                newIdentity.put(UIN, existingIdentity.get(UIN));
+            }
             requestDto.setIdentity(newIdentity);
+            // Preserve documents (biometrics + supporting docs) from the incoming
+            // request. Without this, when CreateDraftStage's populate path calls
+            // updateDraft right after createDraft, the documents were being silently
+            // dropped — leaving the draft with identity only and no biometrics.
+            requestDto.setDocuments(incoming.getDocuments());
             requestDto.setRegistrationId(responseDTO.getRegistrationId());
             requestDto.setStatus(responseDTO.getStatus());
             requestDto.setUin(responseDTO.getUin());
