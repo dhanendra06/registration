@@ -21,15 +21,26 @@ import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnitRunner;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.HashMap;
+
+import org.json.simple.JSONObject;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import io.mosip.kernel.biometrics.spi.CbeffUtil;
 import io.mosip.registration.processor.core.abstractverticle.MessageDTO;
 import io.mosip.registration.processor.core.code.ApiName;
 import io.mosip.registration.processor.core.common.rest.dto.ErrorDTO;
 import io.mosip.registration.processor.core.exception.ApisResourceAccessException;
 import io.mosip.registration.processor.core.spi.restclient.RegistrationProcessorRestClientService;
 import io.mosip.registration.processor.core.util.RegistrationExceptionMapperUtil;
+import io.mosip.registration.processor.packet.manager.dto.IdResponseDTO;
 import io.mosip.registration.processor.packet.manager.exception.IdrepoDraftException;
 import io.mosip.registration.processor.packet.manager.exception.IdrepoDraftReprocessableException;
 import io.mosip.registration.processor.packet.manager.idreposervice.IdrepoDraftService;
+import io.mosip.registration.processor.packet.storage.utils.IdSchemaUtil;
+import io.mosip.registration.processor.packet.storage.utils.PriorityBasedPacketManagerService;
+import io.mosip.registration.processor.packet.storage.utils.Utilities;
 import io.mosip.registration.processor.packet.storage.utils.Utility;
 import io.mosip.registration.processor.rest.client.audit.builder.AuditLogRequestBuilder;
 import io.mosip.registration.processor.stages.createdraft.dto.UinGenResponseDto;
@@ -71,6 +82,21 @@ public class CreateDraftStageTest {
     @Mock
     private RegistrationExceptionMapperUtil registrationStatusMapperUtil;
 
+    @Mock
+    private PriorityBasedPacketManagerService packetManagerService;
+
+    @Mock
+    private IdSchemaUtil idSchemaUtil;
+
+    @Mock
+    private Utilities utilities;
+
+    @Mock
+    private ObjectMapper objectMapper;
+
+    @Mock
+    private CbeffUtil cbeffutil;
+
     private MessageDTO messageDTO;
     private InternalRegistrationStatusDto registrationStatusDto;
 
@@ -89,6 +115,28 @@ public class CreateDraftStageTest {
         when(registrationStatusService.getRegistrationStatus(anyString(), any(), any(), any()))
                 .thenReturn(registrationStatusDto);
         when(registrationStatusMapperUtil.getStatusCode(any())).thenReturn("ERROR");
+
+        // Populate-draft path stubs: make the new code in process() succeed without
+        // forcing every test to re-stub them. Tests that need different behaviour can
+        // override these.
+        ReflectionTestUtils.setField(createDraftStage, "idRepoUpdate", "mosip.id.update");
+        ReflectionTestUtils.setField(createDraftStage, "idRepoApiVersion", "v1");
+        ReflectionTestUtils.setField(createDraftStage, "convertIdschemaToDouble", true);
+        ReflectionTestUtils.setField(createDraftStage, "trimWhitespaces", false);
+
+        try {
+            when(packetManagerService.getFieldByMappingJsonKey(anyString(), anyString(), any(), any()))
+                    .thenReturn("0.1");
+            when(packetManagerService.getFields(anyString(), any(), any(), any()))
+                    .thenReturn(new HashMap<>());
+            when(idSchemaUtil.getDefaultFields(any(Double.class))).thenReturn(new ArrayList<>());
+            when(utilities.getRegistrationProcessorMappingJson(anyString())).thenReturn(new JSONObject());
+            when(idrepoDraftService.idrepoUpdateDraft(anyString(), any(), any()))
+                    .thenReturn(new IdResponseDTO());
+        } catch (Exception ignored) {
+            // Mockito stubs declare the same checked exceptions as the mocked methods;
+            // ignore here since setup never actually invokes them.
+        }
     }
 
     // -----------------------------------------------------------------------

@@ -263,58 +263,17 @@ public class UinGeneratorStage extends MosipVerticleAPIManager {
 
 				if (StringUtils.isEmpty(uinField) || uinField.equalsIgnoreCase("null") ) {
 
-					idResponseDTO = sendIdRepoWithUin(registrationId, registrationStatusDto.getRegistrationType(), demographicIdentity,
-							uinField);
-
-					boolean isUinAlreadyPresent = isUinAlreadyPresent(idResponseDTO, registrationId);
-
-					if (isIdResponseNotNull(idResponseDTO) || isUinAlreadyPresent) {
-						registrationStatusDto.setStatusComment(StatusUtil.UIN_GENERATED_SUCCESS.getMessage());
-						registrationStatusDto.setSubStatusCode(StatusUtil.UIN_GENERATED_SUCCESS.getCode());
-						isTransactionSuccessful = true;
-						registrationStatusDto.setStatusCode(RegistrationStatusCode.PROCESSING.toString());
-						description.setMessage(PlatformSuccessMessages.RPR_UIN_GENERATOR_STAGE_SUCCESS.getMessage());
-						description.setCode(PlatformSuccessMessages.RPR_UIN_GENERATOR_STAGE_SUCCESS.getCode());
-						description.setTransactionStatusCode(RegistrationTransactionStatusCode.SUCCESS.toString());
-					} else {
-						List<ErrorDTO> errors = idResponseDTO != null ? idResponseDTO.getErrors() : null;
-						String statusComment = errors != null ? errors.get(0).getMessage()
-								: UINConstants.NULL_IDREPO_RESPONSE;
-						int unknownErrorCount=0;
-						for(ErrorDTO dto:errors) {
-							if(dto.getErrorCode().equalsIgnoreCase("IDR-IDC-004")||dto.getErrorCode().equalsIgnoreCase("IDR-IDC-001")) {
-								unknownErrorCount++;
-							}
-						}
-						if(unknownErrorCount>0) {
-							registrationStatusDto.setStatusCode(RegistrationStatusCode.PROCESSING.toString());
-							registrationStatusDto.setLatestTransactionStatusCode(registrationStatusMapperUtil
-									.getStatusCode(RegistrationExceptionTypeCode.PACKET_UIN_GENERATION_REPROCESS));
-							description.setTransactionStatusCode(registrationStatusMapperUtil
-									.getStatusCode(RegistrationExceptionTypeCode.PACKET_UIN_GENERATION_REPROCESS));
-						}
-						else {
-							registrationStatusDto.setStatusCode(RegistrationStatusCode.FAILED.toString());
-							registrationStatusDto.setLatestTransactionStatusCode(registrationStatusMapperUtil
-									.getStatusCode(RegistrationExceptionTypeCode.PACKET_UIN_GENERATION_FAILED));
-							description.setTransactionStatusCode(registrationStatusMapperUtil
-									.getStatusCode(RegistrationExceptionTypeCode.PACKET_UIN_GENERATION_FAILED));
-						}
-						registrationStatusDto.setStatusComment(trimExceptionMessage
-								.trimExceptionMessage(StatusUtil.UIN_GENERATION_FAILED.getMessage() + statusComment));
-						object.setInternalError(Boolean.TRUE);
-						isTransactionSuccessful = false;
-						description.setMessage(PlatformErrorMessages.RPR_UGS_UIN_UPDATE_FAILURE.getMessage());
-						description.setCode(PlatformErrorMessages.RPR_UGS_UIN_UPDATE_FAILURE.getCode());
-						description.setSubStatusCode(StatusUtil.UIN_GENERATION_FAILED.getCode());
-						String idres = idResponseDTO != null ? idResponseDTO.toString()
-								: UINConstants.NULL_IDREPO_RESPONSE;
-
-						regProcLogger.error(LoggerFileConstant.SESSIONID.toString(),
-								LoggerFileConstant.REGISTRATIONID.toString(), registrationId,
-								statusComment + "  :  " + idres);
-						object.setIsValid(Boolean.FALSE);
-					}
+					// NEW packet flow: the Create Draft stage has already allocated the UIN
+					// and populated the draft with the full identity (demographics + biometrics).
+					// UinGeneratorStage no longer creates the draft here; just mark the stage
+					// successful and let the packet continue downstream.
+					registrationStatusDto.setStatusComment(StatusUtil.UIN_GENERATED_SUCCESS.getMessage());
+					registrationStatusDto.setSubStatusCode(StatusUtil.UIN_GENERATED_SUCCESS.getCode());
+					isTransactionSuccessful = true;
+					registrationStatusDto.setStatusCode(RegistrationStatusCode.PROCESSING.toString());
+					description.setMessage(PlatformSuccessMessages.RPR_UIN_GENERATOR_STAGE_SUCCESS.getMessage());
+					description.setCode(PlatformSuccessMessages.RPR_UIN_GENERATOR_STAGE_SUCCESS.getCode());
+					description.setTransactionStatusCode(RegistrationTransactionStatusCode.SUCCESS.toString());
 
 				} else {
 					if ((RegistrationType.ACTIVATED.toString()).equalsIgnoreCase(object.getReg_type())) {
@@ -525,63 +484,6 @@ public class UinGeneratorStage extends MosipVerticleAPIManager {
             }
         }
     }
-
-	/**
-	 * Send id repo with uin.
-	 *
-	 * @param id
-	 *            the reg id
-	 * @param uin
-	 *            the uin
-	 * @throws ApisResourceAccessException
-	 * @throws IOException
-	 * @throws JsonMappingException
-	 * @throws JsonParseException
-	 * @throws VidCreationException
-	 * @throws io.mosip.kernel.core.exception.IOException
-	 * @throws Exception
-	 */
-	private IdResponseDTO sendIdRepoWithUin(String id, String process, JSONObject demographicIdentity, String uin)
-			throws Exception {
-
-		List<Documents> documentInfo = getAllDocumentsByRegId(id, process, demographicIdentity);
-		RequestDto requestDto = new RequestDto();
-		requestDto.setIdentity(demographicIdentity);
-		requestDto.setDocuments(documentInfo);
-		requestDto.setRegistrationId(id);
-		requestDto.setStatus(RegistrationType.ACTIVATED.toString());
-		requestDto.setBiometricReferenceId(uin);
-
-		IdResponseDTO result = null;
-		IdRequestDto idRequestDTO = new IdRequestDto();
-		idRequestDTO.setId(idRepoUpdate);
-		idRequestDTO.setRequest(requestDto);
-		idRequestDTO.setRequesttime(DateUtils2.getUTCCurrentDateTimeString());
-		idRequestDTO.setVersion(UINConstants.idRepoApiVersion);
-		idRequestDTO.setMetadata(null);
-
-		try {
-
-			result = idrepoDraftService.idrepoUpdateDraft(id, null, idRequestDTO);
-
-		} catch (ApisResourceAccessException e) {
-			regProcLogger.error("Execption occured updating draft for id " + id, e);
-			if (e.getCause() instanceof HttpClientErrorException) {
-				HttpClientErrorException httpClientException = (HttpClientErrorException) e.getCause();
-				throw new ApisResourceAccessException(httpClientException.getResponseBodyAsString(),
-						httpClientException);
-			} else if (e.getCause() instanceof HttpServerErrorException) {
-				HttpServerErrorException httpServerException = (HttpServerErrorException) e.getCause();
-				throw new ApisResourceAccessException(httpServerException.getResponseBodyAsString(),
-						httpServerException);
-			} else {
-				throw e;
-			}
-
-		}
-		return result;
-
-	}
 
 	/**
 	 * Gets the all documents by reg id.

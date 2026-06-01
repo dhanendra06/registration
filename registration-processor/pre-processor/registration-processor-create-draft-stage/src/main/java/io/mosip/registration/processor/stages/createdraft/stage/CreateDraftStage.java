@@ -1,14 +1,29 @@
 package io.mosip.registration.processor.stages.createdraft.stage;
 
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONTokener;
+import org.json.simple.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.stereotype.Service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import io.mosip.kernel.biometrics.entities.BiometricRecord;
+import io.mosip.kernel.biometrics.spi.CbeffUtil;
 import io.mosip.kernel.core.logger.spi.Logger;
+import io.mosip.kernel.core.util.CryptoUtil;
+import io.mosip.kernel.core.util.DateUtils2;
 import io.mosip.kernel.core.util.StringUtils;
 import io.mosip.registration.processor.core.abstractverticle.MessageBusAddress;
 import io.mosip.registration.processor.core.abstractverticle.MessageDTO;
@@ -16,6 +31,17 @@ import io.mosip.registration.processor.core.abstractverticle.MosipEventBus;
 import io.mosip.registration.processor.core.abstractverticle.MosipRouter;
 import io.mosip.registration.processor.core.abstractverticle.MosipVerticleAPIManager;
 import io.mosip.registration.processor.core.code.ApiName;
+import io.mosip.registration.processor.core.constant.MappingJsonConstants;
+import io.mosip.registration.processor.core.exception.PacketManagerException;
+import io.mosip.registration.processor.core.idrepo.dto.Documents;
+import io.mosip.registration.processor.core.util.JsonUtil;
+import io.mosip.registration.processor.packet.storage.dto.Document;
+import io.mosip.registration.processor.packet.manager.dto.IdRequestDto;
+import io.mosip.registration.processor.packet.manager.dto.IdResponseDTO;
+import io.mosip.registration.processor.packet.manager.dto.RequestDto;
+import io.mosip.registration.processor.packet.storage.utils.IdSchemaUtil;
+import io.mosip.registration.processor.packet.storage.utils.PriorityBasedPacketManagerService;
+import io.mosip.registration.processor.packet.storage.utils.Utilities;
 import io.mosip.registration.processor.core.code.EventId;
 import io.mosip.registration.processor.core.code.EventName;
 import io.mosip.registration.processor.core.code.EventType;
@@ -109,6 +135,38 @@ public class CreateDraftStage extends MosipVerticleAPIManager {
     /** Status mapper utility. */
     @Autowired
     private RegistrationExceptionMapperUtil registrationStatusMapperUtil;
+
+    /** Packet Manager service for reading demographic/document/biometric data from the packet. */
+    @Autowired
+    private PriorityBasedPacketManagerService packetManagerService;
+
+    /** ID schema utility for resolving default fields per schema version. */
+    @Autowired
+    private IdSchemaUtil idSchemaUtil;
+
+    /** Utilities for identity / document mapping lookups. */
+    @Autowired
+    private Utilities utilities;
+
+    /** Jackson object mapper for JSON conversions. */
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    /** CBEFF utility for building biometric XML. */
+    @Autowired
+    private CbeffUtil cbeffutil;
+
+    @Value("${registration.processor.id.repo.update}")
+    private String idRepoUpdate;
+
+    @Value("${mosip.registration.processor.id.repo.api-version:v1}")
+    private String idRepoApiVersion;
+
+    @Value("${mosip.regproc.uin-generator.convert-id-schema-to-double:true}")
+    private boolean convertIdschemaToDouble;
+
+    @Value("${mosip.regproc.uin.generator.trim-whitespaces.simpleType-value:false}")
+    private boolean trimWhitespaces;
 
     private TrimExceptionMessage trimExceptionMessage = new TrimExceptionMessage();
 
@@ -214,13 +272,19 @@ public class CreateDraftStage extends MosipVerticleAPIManager {
                 }
             }
 
-            // Create the draft in ID Repository
+            // Create the empty draft in ID Repository (registers UIN).
             boolean created = idrepoDraftService.idrepoCreateDraft(registrationId, uin);
             if (!created) {
                 throw new IdrepoDraftException(
                         PlatformErrorMessages.RPR_CDS_DRAFT_CREATION_FAILED.getCode(),
                         PlatformErrorMessages.RPR_CDS_DRAFT_CREATION_FAILED.getMessage());
             }
+
+            // Populate the draft with demographic + biometric data so downstream stages
+            // (demo-dedupe, bio-dedupe, ABIS, verification) can read it via the Draft API.
+            // Per design: do NOT discard the draft if populate fails — let the reprocessor
+            // retry; the existing draft will be discarded and recreated on the next attempt.
+            populateDraftWithIdentity(registrationId, registrationStatusDto.getRegistrationType(), uin);
 
             isTransactionSuccessful = Boolean.TRUE;
             object.setIsValid(Boolean.TRUE);
@@ -366,5 +430,143 @@ public class CreateDraftStage extends MosipVerticleAPIManager {
         } else {
             object.setIsValid(false);
         }
+    }
+
+    /**
+     * Builds the demographic identity + biometric documents from the packet
+     * and pushes them into the ID Repository draft via {@code idrepoUpdateDraft}.
+     */
+    private void populateDraftWithIdentity(String registrationId, String process, String uin) throws Exception {
+        String schemaVersion = packetManagerService.getFieldByMappingJsonKey(registrationId,
+                MappingJsonConstants.IDSCHEMA_VERSION, process, ProviderStageName.CREATE_DRAFT);
+
+        Map<String, String> fieldMap = packetManagerService.getFields(registrationId,
+                idSchemaUtil.getDefaultFields(Double.valueOf(schemaVersion)), process,
+                ProviderStageName.CREATE_DRAFT);
+
+        JSONObject demographicIdentity = new JSONObject();
+        demographicIdentity.put(MappingJsonConstants.IDSCHEMA_VERSION,
+                convertIdschemaToDouble ? Double.valueOf(schemaVersion) : schemaVersion);
+        loadDemographicIdentity(fieldMap, demographicIdentity);
+
+        List<Documents> documentInfo = getAllDocumentsByRegId(registrationId, process, demographicIdentity);
+
+        RequestDto requestDto = new RequestDto();
+        requestDto.setIdentity(demographicIdentity);
+        requestDto.setDocuments(documentInfo);
+        requestDto.setRegistrationId(registrationId);
+        requestDto.setStatus(RegistrationType.ACTIVATED.toString());
+        requestDto.setBiometricReferenceId(uin);
+
+        IdRequestDto idRequestDTO = new IdRequestDto();
+        idRequestDTO.setId(idRepoUpdate);
+        idRequestDTO.setRequest(requestDto);
+        idRequestDTO.setRequesttime(DateUtils2.getUTCCurrentDateTimeString());
+        idRequestDTO.setVersion(idRepoApiVersion);
+
+        IdResponseDTO response = idrepoDraftService.idrepoUpdateDraft(registrationId, uin, idRequestDTO);
+        regProcLogger.info(LoggerFileConstant.SESSIONID.toString(),
+                LoggerFileConstant.REGISTRATIONID.toString(), registrationId,
+                "Draft populated with identity. id-repo response id: "
+                        + (response != null ? response.getId() : "null"));
+    }
+
+    /**
+     * Copies field values from packet manager into the {@code demographicIdentity} JSON.
+     * Mirrors {@code UinGeneratorStage.loadDemographicIdentity} so downstream stages see
+     * the same shape they would have seen from packet manager.
+     */
+    private void loadDemographicIdentity(Map<String, String> fieldMap, JSONObject demographicIdentity)
+            throws IOException, JSONException {
+        for (Map.Entry e : fieldMap.entrySet()) {
+            if (e.getValue() == null) {
+                continue;
+            }
+            String value = e.getValue().toString();
+            Object json = new JSONTokener(value).nextValue();
+            if (json instanceof org.json.JSONObject) {
+                HashMap<String, Object> hashMap = objectMapper.readValue(value, HashMap.class);
+                demographicIdentity.putIfAbsent(e.getKey(), hashMap);
+                continue;
+            }
+            if (json instanceof JSONArray) {
+                List<Object> jsonList = new ArrayList<>();
+                JSONArray jsonArray = new JSONArray(value);
+                for (int i = 0; i < jsonArray.length(); i++) {
+                    Object obj = jsonArray.get(i);
+                    if (obj instanceof String) {
+                        jsonList.add(obj);
+                    } else {
+                        HashMap<String, Object> hashMap = objectMapper.readValue(obj.toString(), HashMap.class);
+                        if (trimWhitespaces && hashMap.containsKey("value")
+                                && hashMap.get("value") instanceof String) {
+                            hashMap.put("value", ((String) hashMap.get("value")).trim());
+                        }
+                        jsonList.add(hashMap);
+                    }
+                }
+                demographicIdentity.putIfAbsent(e.getKey(), jsonList);
+            } else {
+                demographicIdentity.putIfAbsent(e.getKey(), value);
+            }
+        }
+    }
+
+    /**
+     * Builds the list of documents (incl. biometrics) for the draft payload.
+     */
+    private List<Documents> getAllDocumentsByRegId(String regId, String process, JSONObject demographicIdentity)
+            throws Exception {
+        List<Documents> applicantDocuments = new ArrayList<>();
+        JSONObject idJSON = demographicIdentity;
+        JSONObject docJson = utilities.getRegistrationProcessorMappingJson(MappingJsonConstants.DOCUMENT);
+        JSONObject identityJson = utilities.getRegistrationProcessorMappingJson(MappingJsonConstants.IDENTITY);
+
+        String applicantBiometricLabel = JsonUtil.getJSONValue(
+                JsonUtil.getJSONObject(identityJson, MappingJsonConstants.INDIVIDUAL_BIOMETRICS),
+                MappingJsonConstants.VALUE);
+
+        HashMap<String, String> applicantBiometric = (HashMap<String, String>) idJSON.get(applicantBiometricLabel);
+
+        for (Object doc : docJson.values()) {
+            Map docMap = (LinkedHashMap) doc;
+            String docValue = docMap.values().iterator().next().toString();
+            HashMap<String, String> docInIdentityJson = (HashMap<String, String>) idJSON.get(docValue);
+            if (docInIdentityJson != null) {
+                Documents d = getIdDocument(regId, docValue, process);
+                if (d != null) {
+                    applicantDocuments.add(d);
+                }
+            }
+        }
+
+        if (applicantBiometric != null) {
+            applicantDocuments.add(getBiometricsDocument(regId, applicantBiometricLabel, process));
+        }
+        return applicantDocuments;
+    }
+
+    private Documents getIdDocument(String registrationId, String dockey, String process)
+            throws IOException, ApisResourceAccessException, PacketManagerException,
+            io.mosip.kernel.core.util.exception.JsonProcessingException {
+        Documents documentsInfoDto = new Documents();
+        Document document = packetManagerService.getDocument(registrationId, dockey, process,
+                ProviderStageName.CREATE_DRAFT);
+        if (document != null) {
+            documentsInfoDto.setValue(CryptoUtil.encodeToURLSafeBase64(document.getDocument()));
+            documentsInfoDto.setCategory(document.getValue());
+            return documentsInfoDto;
+        }
+        return null;
+    }
+
+    private Documents getBiometricsDocument(String registrationId, String person, String process) throws Exception {
+        BiometricRecord biometricRecord = packetManagerService.getBiometrics(registrationId, person, process,
+                ProviderStageName.CREATE_DRAFT);
+        byte[] xml = cbeffutil.createXML(biometricRecord.getSegments());
+        Documents documentsInfoDto = new Documents();
+        documentsInfoDto.setValue(CryptoUtil.encodeToURLSafeBase64(xml));
+        documentsInfoDto.setCategory(utilities.getMappingJsonValue(person, MappingJsonConstants.IDENTITY));
+        return documentsInfoDto;
     }
 }
