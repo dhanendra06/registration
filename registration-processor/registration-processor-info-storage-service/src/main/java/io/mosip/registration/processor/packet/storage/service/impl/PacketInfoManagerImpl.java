@@ -250,7 +250,18 @@ public class PacketInfoManagerImpl implements PacketInfoManager<Identity, Applic
 					JSONObject draftIdentityObj = objectMapper.readValue(draftIdentityJson, JSONObject.class);
 					for (String field : fields) {
 						Object fieldValue = draftIdentityObj.get(field);
-						if (fieldValue != null) {
+						if (fieldValue == null) {
+							continue;
+						}
+						// Match the wire format that packetManagerService.getFields() returns:
+						// - plain scalars (dob, gender code, phone, email): unquoted string
+						// - complex values (name array, structured object): JSON string
+						// Using writeValueAsString unconditionally double-quotes scalars
+						// (e.g. "1945/04/09" instead of 1945/04/09), which breaks downstream
+						// consumers like PacketInfoMapper that expect raw date strings.
+						if (fieldValue instanceof String || fieldValue instanceof Number || fieldValue instanceof Boolean) {
+							fieldMap.put(field, fieldValue.toString());
+						} else {
 							fieldMap.put(field, objectMapper.writeValueAsString(fieldValue));
 						}
 					}
