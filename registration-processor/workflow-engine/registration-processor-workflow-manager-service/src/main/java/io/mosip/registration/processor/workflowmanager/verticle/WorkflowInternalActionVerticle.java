@@ -267,6 +267,40 @@ public class WorkflowInternalActionVerticle extends MosipVerticleAPIManager {
 
 		regProcLogger.info("processAnonymousProfile called for registration id {}", registrationId);
 
+		// WP2: try the lightweight path first — PacketClassifier persists the base
+		// anonymous JSON to the object store. If present, enrich it with current
+		// stage/datetime/status and save. Falls through to the legacy packet-manager
+		// fan-out below if the object-store copy is missing (older packets, or any
+		// scenario where the classifier-side persistence didn't happen). This preserves
+		// every existing automation scenario unchanged.
+		try {
+			Map<String, String> anonymousTags = packetManagerService.getTags(
+					registrationId, null, "anonymous");
+			String baseJson = anonymousTags != null ? anonymousTags.get("anonymous") : null;
+			if (baseJson != null && !baseJson.isEmpty()) {
+				InternalRegistrationStatusDto statusDto = registrationStatusService.getRegistrationStatus(
+						registrationId, registrationType,
+						workflowInternalActionDTO.getIteration(),
+						workflowInternalActionDTO.getWorkflowInstanceId());
+				org.json.JSONObject enriched = new org.json.JSONObject(baseJson);
+				enriched.put("processStage", statusDto.getRegistrationStageName());
+				enriched.put("statusCode", statusDto.getStatusCode());
+				enriched.put("updatedDateTime",
+						io.mosip.kernel.core.util.DateUtils2.getUTCCurrentDateTimeString());
+				anonymousProfileService.saveAnonymousProfile(
+						registrationId, statusDto.getRegistrationStageName(), enriched.toString());
+				this.send(this.mosipEventBus, new MessageBusAddress(anonymousProfileBusAddress), workflowInternalActionDTO);
+				regProcLogger.info("processAnonymousProfile ended (object-store fast-path) for registration id {}",
+						registrationId);
+				return;
+			}
+		} catch (Exception e) {
+			// Object-store fast-path is opportunistic. On any failure, fall back to the
+			// legacy packet-manager flow below so we never regress existing behavior.
+			regProcLogger.warn("Anonymous profile fast-path failed for {} ({}); using legacy flow",
+					registrationId, e.getMessage());
+		}
+
 		try (ExecutorService virtualThreadExecutor = Executors.newVirtualThreadPerTaskExecutor()) {
 			// Round 1: fire all independent calls in parallel
 			CompletableFuture<InternalRegistrationStatusDto> registrationStatusFuture =

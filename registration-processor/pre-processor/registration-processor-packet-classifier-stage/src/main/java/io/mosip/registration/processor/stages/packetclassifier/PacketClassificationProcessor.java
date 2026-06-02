@@ -57,10 +57,12 @@ import io.mosip.registration.processor.packet.storage.utils.Utilities;
 import io.mosip.registration.processor.rest.client.audit.builder.AuditLogRequestBuilder;
 import io.mosip.registration.processor.stages.packetclassifier.dto.FieldDTO;
 import io.mosip.registration.processor.stages.packetclassifier.tagging.TagGenerator;
+import io.mosip.kernel.biometrics.entities.BiometricRecord;
 import io.mosip.registration.processor.status.code.RegistrationStatusCode;
 import io.mosip.registration.processor.status.dto.InternalRegistrationStatusDto;
 import io.mosip.registration.processor.status.dto.RegistrationStatusDto;
 import io.mosip.registration.processor.status.exception.TablenotAccessibleException;
+import io.mosip.registration.processor.status.service.AnonymousProfileService;
 import io.mosip.registration.processor.status.service.RegistrationStatusService;
 
 /**
@@ -134,11 +136,21 @@ public class PacketClassificationProcessor {
 	@Autowired
 	private IdSchemaUtil idSchemaUtil;
 
-	/** 
-	 * This List will contain all the tag generators that is applicable as per the configuration 
+	/**
+	 * This List will contain all the tag generators that is applicable as per the configuration
 	 */
 	@Autowired
 	private List<TagGenerator> tagGenerators;
+
+	/**
+	 * Builds and persists the anonymous profile. Used to (a) compute the profile JSON
+	 * via {@link AnonymousProfileService#buildJsonStringFromPacketInfo} and (b) write
+	 * the row to {@code regprc.anonymous_profile} (transition-safety / Choice B).
+	 * The same JSON is also included in the tags map under key {@code "anonymous"}; the
+	 * commons-packet writer service intercepts that key and routes it to the object store.
+	 */
+	@Autowired
+	private AnonymousProfileService anonymousProfileService;
 
 	/** 
 	 * Id object fields required by all the configured tag generators will be maintained here
@@ -397,6 +409,44 @@ public class PacketClassificationProcessor {
 			}
 
 			handleNullValueTags(allTags);
+
+			// Build and attach the anonymous profile. The JSON is added under tag key
+			// "anonymous"; the commons-packet writer service intercepts that key on
+			// addOrUpdate and routes the value to the object store as anonymous.json
+			// (it does NOT persist the value as a regular tag). The same JSON is also
+			// saved to the regprc.anonymous_profile DB table for transition safety.
+			try {
+				String identityFieldsJson = identityFieldValueMap.get(idSchemaVersionLabel);
+				Map<String, String> defaultFieldsMap = priorityBasedPacketManagerService.getFields(
+						registrationId,
+						idSchemaUtil.getDefaultFields(Double.valueOf(identityFieldsJson)),
+						process, ProviderStageName.CLASSIFICATION);
+				BiometricRecord biometricRecord = priorityBasedPacketManagerService.getBiometrics(
+						registrationId, MappingJsonConstants.INDIVIDUAL_BIOMETRICS,
+						process, ProviderStageName.CLASSIFICATION);
+				String anonymousProfileJson = anonymousProfileService.buildJsonStringFromPacketInfo(
+						biometricRecord, defaultFieldsMap, fieldTypeMap, metaInfoMap,
+						RegistrationStatusCode.PROCESSING.toString(),
+						ModuleName.PACKET_CLASSIFIER.toString());
+				if (anonymousProfileJson != null && !anonymousProfileJson.isEmpty()) {
+					allTags.put("anonymous", anonymousProfileJson);
+					// Choice B: also persist to DB for transition safety. Failures here must
+					// not fail the stage — DB-side persistence is a best-effort secondary path.
+					try {
+						anonymousProfileService.saveAnonymousProfile(
+								registrationId, ModuleName.PACKET_CLASSIFIER.toString(), anonymousProfileJson);
+					} catch (Exception dbEx) {
+						regProcLogger.warn("Anonymous profile DB save failed for {} ({}); object-store copy still attempted",
+								registrationId, dbEx.getMessage());
+					}
+				}
+			} catch (Exception anonymousEx) {
+				// Anonymous profile is an analytics-side artefact. A failure to build it
+				// must not block the packet's main pipeline.
+				regProcLogger.warn("Anonymous profile build failed for {}: {}; packet classification continues",
+						registrationId, anonymousEx.getMessage());
+			}
+
 			regProcLogger.debug("generated tags {}", new JSONObject(allTags).toString());
 			if (!allTags.isEmpty())
 				packetManagerService.addOrUpdateTags(registrationId, allTags);

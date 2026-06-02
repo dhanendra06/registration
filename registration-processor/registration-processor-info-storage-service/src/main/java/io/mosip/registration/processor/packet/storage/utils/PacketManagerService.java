@@ -348,7 +348,21 @@ public class PacketManagerService {
     }
 
     public Map<String, String> getTags(String id, List<String> tagNames) throws ApisResourceAccessException, PacketManagerException, JsonProcessingException, IOException {
-        TagRequestDto tagRequestDto = new TagRequestDto(id, tagNames);
+        return getTags(id, tagNames, null);
+    }
+
+    /**
+     * Granular tag retrieval. {@code type} corresponds to the new {@code TagRequestDto.type}
+     * recognised by the commons-packet getTags service:
+     * <ul>
+     *   <li>{@code null} / empty — default packet tags, with any "anonymous" entries filtered out.</li>
+     *   <li>{@code "anonymous"} — returns only the anonymous profile as a single-entry map under key {@code "anonymous"}.</li>
+     *   <li>{@code "all"} — packet tags + anonymous file (no filtering).</li>
+     * </ul>
+     */
+    public Map<String, String> getTags(String id, List<String> tagNames, String type)
+            throws ApisResourceAccessException, PacketManagerException, JsonProcessingException, IOException {
+        TagRequestDto tagRequestDto = new TagRequestDto(id, tagNames, type);
         RequestWrapper<TagRequestDto> request = new RequestWrapper<>();
         request.setId(ID);
         request.setVersion(VERSION);
