@@ -30,7 +30,6 @@ import io.mosip.registration.processor.core.abstractverticle.MessageDTO;
 import io.mosip.registration.processor.core.abstractverticle.MosipEventBus;
 import io.mosip.registration.processor.core.abstractverticle.MosipRouter;
 import io.mosip.registration.processor.core.abstractverticle.MosipVerticleAPIManager;
-import io.mosip.registration.processor.core.code.ApiName;
 import io.mosip.registration.processor.core.constant.MappingJsonConstants;
 import io.mosip.registration.processor.core.exception.PacketManagerException;
 import io.mosip.registration.processor.core.idrepo.dto.Documents;
@@ -56,7 +55,6 @@ import io.mosip.registration.processor.core.exception.util.PlatformErrorMessages
 import io.mosip.registration.processor.core.exception.util.PlatformSuccessMessages;
 import io.mosip.registration.processor.core.logger.LogDescription;
 import io.mosip.registration.processor.core.logger.RegProcessorLogger;
-import io.mosip.registration.processor.core.spi.restclient.RegistrationProcessorRestClientService;
 import io.mosip.registration.processor.core.status.util.StatusUtil;
 import io.mosip.registration.processor.core.status.util.TrimExceptionMessage;
 import io.mosip.registration.processor.core.util.RegistrationExceptionMapperUtil;
@@ -65,7 +63,6 @@ import io.mosip.registration.processor.packet.manager.exception.IdrepoDraftRepro
 import io.mosip.registration.processor.packet.manager.idreposervice.IdrepoDraftService;
 import io.mosip.registration.processor.packet.storage.utils.Utility;
 import io.mosip.registration.processor.rest.client.audit.builder.AuditLogRequestBuilder;
-import io.mosip.registration.processor.stages.createdraft.dto.UinGenResponseDto;
 import io.mosip.registration.processor.status.code.RegistrationStatusCode;
 import io.mosip.registration.processor.status.code.RegistrationType;
 import io.mosip.registration.processor.status.dto.InternalRegistrationStatusDto;
@@ -75,7 +72,12 @@ import io.mosip.registration.processor.status.service.RegistrationStatusService;
 /**
  * Create Draft Stage – introduces a new stage placed before the Quality
  * Classifier stage. Responsible for creating (or re-creating) an ID Repository
- * Draft for NEW and UPDATE packets, with mandatory UIN allocation.
+ * Draft for NEW and UPDATE packets.
+ *
+ * <p>For NEW packets the UIN is allocated and assigned internally by the ID
+ * Repository during draft creation (no UIN Generator call here).
+ * For UPDATE packets the existing UIN is read from the packet so the ID
+ * Repository can clone the existing identity into the draft.</p>
  *
  * <p>Workflow position: … → Packet Classifier → Create Draft → Quality Classifier → …</p>
  */
@@ -119,10 +121,6 @@ public class CreateDraftStage extends MosipVerticleAPIManager {
     /** Draft service for ID Repository draft operations. */
     @Autowired
     private IdrepoDraftService idrepoDraftService;
-
-    /** REST client service for external API calls (UIN Generator). */
-    @Autowired
-    private RegistrationProcessorRestClientService<Object> registrationProcessorRestClientService;
 
     /** Utility for retrieving UIN from the packet. */
     @Autowired
@@ -255,12 +253,11 @@ public class CreateDraftStage extends MosipVerticleAPIManager {
                 idrepoDraftService.idrepoDiscardDraft(registrationId);
             }
 
-            // Determine the UIN to associate with the draft
-            String uin;
-            if (RegistrationType.NEW.toString().equalsIgnoreCase(regType)) {
-                uin = allocateUin(registrationId);
-            } else {
-                // UPDATE packet – fetch the existing UIN from the packet
+            // For UPDATE packets, fetch the existing UIN so ID Repo can clone the
+            // existing identity into the draft. For NEW packets, pass null — ID Repo
+            // will allocate and assign the UIN internally during draft creation.
+            String uin = null;
+            if (RegistrationType.UPDATE.toString().equalsIgnoreCase(regType)) {
                 uin = utility.getUIn(registrationId, registrationStatusDto.getRegistrationType(),
                         ProviderStageName.CREATE_DRAFT);
                 if (StringUtils.isEmpty(uin) || "null".equalsIgnoreCase(uin)) {
@@ -272,7 +269,7 @@ public class CreateDraftStage extends MosipVerticleAPIManager {
                 }
             }
 
-            // Create the empty draft in ID Repository (registers UIN).
+            // Create draft. For NEW: ID Repo auto-generates UIN. For UPDATE: uses existing UIN.
             boolean created = idrepoDraftService.idrepoCreateDraft(registrationId, uin);
             if (!created) {
                 throw new IdrepoDraftException(
@@ -379,47 +376,6 @@ public class CreateDraftStage extends MosipVerticleAPIManager {
         }
 
         return object;
-    }
-
-    /**
-     * Calls the UIN Generator kernel service to allocate a new UIN.
-     *
-     * @param registrationId the registration ID (used only for logging)
-     * @return the newly allocated UIN string
-     * @throws ApisResourceAccessException if the UIN Generator service call fails
-     */
-    private String allocateUin(String registrationId) throws ApisResourceAccessException {
-        regProcLogger.debug(LoggerFileConstant.SESSIONID.toString(),
-                LoggerFileConstant.REGISTRATIONID.toString(), registrationId,
-                "Allocating UIN via UIN Generator service");
-
-        UinGenResponseDto uinResponse = (UinGenResponseDto) registrationProcessorRestClientService.getApi(
-                ApiName.UINGENERATOR, new ArrayList<>(), "", "", UinGenResponseDto.class);
-
-        if (uinResponse == null || uinResponse.getErrors() != null && !uinResponse.getErrors().isEmpty()) {
-            String errorMsg = uinResponse != null && uinResponse.getErrors() != null
-                    ? uinResponse.getErrors().get(0).getMessage()
-                    : "Null response from UIN Generator";
-            regProcLogger.error(LoggerFileConstant.SESSIONID.toString(),
-                    LoggerFileConstant.REGISTRATIONID.toString(), registrationId,
-                    "UIN allocation failed: " + errorMsg);
-            throw new ApisResourceAccessException(
-                    PlatformErrorMessages.RPR_CDS_UIN_ALLOCATION_FAILED.getMessage() + " : " + errorMsg);
-        }
-
-        if (uinResponse.getResponse() == null || StringUtils.isEmpty(uinResponse.getResponse().getUin())) {
-            regProcLogger.error(LoggerFileConstant.SESSIONID.toString(),
-                    LoggerFileConstant.REGISTRATIONID.toString(), registrationId,
-                    "UIN Generator returned empty UIN");
-            throw new ApisResourceAccessException(
-                    PlatformErrorMessages.RPR_CDS_UIN_ALLOCATION_FAILED.getMessage());
-        }
-
-        String uin = uinResponse.getResponse().getUin();
-        regProcLogger.info(LoggerFileConstant.SESSIONID.toString(),
-                LoggerFileConstant.REGISTRATIONID.toString(), registrationId,
-                "UIN allocated successfully");
-        return uin;
     }
 
     private void updateErrorFlags(InternalRegistrationStatusDto registrationStatusDto, MessageDTO object) {
