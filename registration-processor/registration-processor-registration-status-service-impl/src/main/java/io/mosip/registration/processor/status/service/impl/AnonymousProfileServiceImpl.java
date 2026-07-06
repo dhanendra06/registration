@@ -319,7 +319,14 @@ public class AnonymousProfileServiceImpl implements AnonymousProfileService {
 					} catch (IllegalArgumentException exception) {
 						digitalIdBytes = CryptoUtil.decodePlainBase64(digitalID.split("\\.")[1]);
 					}
-					biometricInfoDTO.setDigitalId(new String(digitalIdBytes));
+					// Guard against empty or blank decoded payload: @JsonRawValue writes the
+					// String AS-IS, so an empty/blank string would produce invalid JSON in the
+					// output. Treat as null so Jackson serialises the field as "digitalId":null
+					// (or omits it if @JsonInclude(NON_NULL) is configured) instead.
+					if (digitalIdBytes != null && digitalIdBytes.length > 0) {
+						String digitalIdJson = new String(digitalIdBytes).trim();
+						biometricInfoDTO.setDigitalId(digitalIdJson.isEmpty() ? null : digitalIdJson);
+					}
 				}
 				biometrics.add(biometricInfoDTO);
 			}

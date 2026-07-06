@@ -115,7 +115,9 @@ public class AnonymousProfileServiceImplTest {
 
 		HashMap<String, String> entry = new HashMap<String, String>();
 		entry.put("PAYLOAD",
-				"{\"digitalId\":\"eyJ4NWMiOlsiTUlJRjZqQ0NB.OUtnQXdJQkFnSUJCVE.FOQmdrcWhraUc5dzBC\",\"bioValue\":\"<bioValue>\",\"qualityScore\":\"80\",\"bioType\":\"Iris\"}");
+				// Middle segment base64-URL-encodes the JSON object {"serialNo":"123"}
+				// so the decoded digital ID is valid JSON for the @JsonRawValue serialisation path.
+				"{\"digitalId\":\"eyJ4NWMiOlsiTUlJRjZqQ0NB.eyJzZXJpYWxObyI6IjEyMyJ9.FOQmdrcWhraUc5dzBC\",\"bioValue\":\"<bioValue>\",\"qualityScore\":\"80\",\"bioType\":\"Iris\"}");
 		entry.put("EXCEPTION", "false");
 		entry.put("RETRIES", "1");
 
@@ -185,7 +187,10 @@ public class AnonymousProfileServiceImplTest {
 	@Test
 	public void buildJsonStringFromPacketInfoTest() throws JSONException, IOException, BaseCheckedException {
 
-		String json = "{\"processName\":\"NEW\",\"processStage\":\"packetValidatorStage\",\"date\":\"2021-09-12T06:50:19.517872400Z\",\"startDateTime\":\"2021-09-12T06:50:19.517872400Z\",\"endDateTime\":\"2021-09-12T06:50:19.517872400Z\",\"yearOfBirth\":1998,\"gender\":\"Female\",\"location\":[\"Ben Mansour\",\"14022\"],\"preferredLanguages\":null,\"channel\":[\"phone\"],\"exceptions\":[],\"verified\":null,\"biometricInfo\":[{\"type\":\"FINGER\",\"subType\":\"Left RingFinger\",\"qualityScore\":80,\"attempts\":\"1\",\"digitalId\":\"9KgAwIBAgIBBT\"}],\"device\":null,\"documents\":[\"CIN\",\"RNC\"],\"assisted\":[\"110024\"],\"enrollmentCenterId\":\"1003\",\"status\":\"PROCESSED\"}";
+		// With @JsonRawValue on BiometricInfoDTO.digitalId, the value is serialised AS-IS:
+		// the decoded payload {"serialNo":"123"} is written as a nested JSON object,
+		// not as a double-encoded string.
+		String json = "{\"processName\":\"NEW\",\"processStage\":\"packetValidatorStage\",\"date\":\"2021-09-12T06:50:19.517872400Z\",\"startDateTime\":\"2021-09-12T06:50:19.517872400Z\",\"endDateTime\":\"2021-09-12T06:50:19.517872400Z\",\"yearOfBirth\":1998,\"gender\":\"Female\",\"location\":[\"Ben Mansour\",\"14022\"],\"preferredLanguages\":null,\"channel\":[\"phone\"],\"exceptions\":[],\"verified\":null,\"biometricInfo\":[{\"type\":\"FINGER\",\"subType\":\"Left RingFinger\",\"qualityScore\":80,\"attempts\":\"1\",\"digitalId\":{\"serialNo\":\"123\"}}],\"device\":null,\"documents\":[\"CIN\",\"RNC\"],\"assisted\":[\"110024\"],\"enrollmentCenterId\":\"1003\",\"status\":\"PROCESSED\"}";
 		Document doc1 = new Document();
 		doc1.setDocumentType("CIN");
 		Document doc2 = new Document();

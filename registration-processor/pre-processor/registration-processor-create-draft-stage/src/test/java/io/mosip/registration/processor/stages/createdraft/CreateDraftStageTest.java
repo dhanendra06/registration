@@ -4,14 +4,12 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
-import java.util.List;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -29,10 +27,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import io.mosip.kernel.biometrics.spi.CbeffUtil;
 import io.mosip.registration.processor.core.abstractverticle.MessageDTO;
-import io.mosip.registration.processor.core.code.ApiName;
-import io.mosip.registration.processor.core.common.rest.dto.ErrorDTO;
 import io.mosip.registration.processor.core.exception.ApisResourceAccessException;
-import io.mosip.registration.processor.core.spi.restclient.RegistrationProcessorRestClientService;
 import io.mosip.registration.processor.core.util.RegistrationExceptionMapperUtil;
 import io.mosip.registration.processor.packet.manager.dto.IdResponseDTO;
 import io.mosip.registration.processor.packet.manager.exception.IdrepoDraftException;
@@ -43,8 +38,6 @@ import io.mosip.registration.processor.packet.storage.utils.PriorityBasedPacketM
 import io.mosip.registration.processor.packet.storage.utils.Utilities;
 import io.mosip.registration.processor.packet.storage.utils.Utility;
 import io.mosip.registration.processor.rest.client.audit.builder.AuditLogRequestBuilder;
-import io.mosip.registration.processor.stages.createdraft.dto.UinGenResponseDto;
-import io.mosip.registration.processor.stages.createdraft.dto.UinResponseDto;
 import io.mosip.registration.processor.stages.createdraft.stage.CreateDraftStage;
 import io.mosip.registration.processor.status.code.RegistrationStatusCode;
 import io.mosip.registration.processor.status.dto.InternalRegistrationStatusDto;
@@ -58,7 +51,6 @@ import io.mosip.registration.processor.status.service.RegistrationStatusService;
 public class CreateDraftStageTest {
 
     private static final String REG_ID = "10001100770000320200720095022";
-    private static final String ALLOCATED_UIN = "3527812406";
     private static final String EXISTING_UIN = "9876543210";
 
     @InjectMocks
@@ -69,9 +61,6 @@ public class CreateDraftStageTest {
 
     @Mock
     private IdrepoDraftService idrepoDraftService;
-
-    @Mock
-    private RegistrationProcessorRestClientService<Object> registrationProcessorRestClientService;
 
     @Mock
     private Utility utility;
@@ -148,17 +137,14 @@ public class CreateDraftStageTest {
         messageDTO.setReg_type("NEW");
 
         when(idrepoDraftService.idrepoHasDraft(REG_ID)).thenReturn(false);
-        when(idrepoDraftService.idrepoCreateDraft(REG_ID, ALLOCATED_UIN)).thenReturn(true);
-        when(registrationProcessorRestClientService.getApi(
-                eq(ApiName.UINGENERATOR), any(), anyString(), anyString(), any()))
-                .thenReturn(buildUinGenResponse(ALLOCATED_UIN));
+        when(idrepoDraftService.idrepoCreateDraft(REG_ID, null)).thenReturn(true);
 
         MessageDTO result = createDraftStage.process(messageDTO);
 
         assertTrue(result.getIsValid());
         assertFalse(result.getInternalError());
         verify(idrepoDraftService, never()).idrepoDiscardDraft(anyString());
-        verify(idrepoDraftService, times(1)).idrepoCreateDraft(REG_ID, ALLOCATED_UIN);
+        verify(idrepoDraftService, times(1)).idrepoCreateDraft(REG_ID, null);
     }
 
     @Test
@@ -167,17 +153,14 @@ public class CreateDraftStageTest {
 
         when(idrepoDraftService.idrepoHasDraft(REG_ID)).thenReturn(true);
         when(idrepoDraftService.idrepoDiscardDraft(REG_ID)).thenReturn(true);
-        when(idrepoDraftService.idrepoCreateDraft(REG_ID, ALLOCATED_UIN)).thenReturn(true);
-        when(registrationProcessorRestClientService.getApi(
-                eq(ApiName.UINGENERATOR), any(), anyString(), anyString(), any()))
-                .thenReturn(buildUinGenResponse(ALLOCATED_UIN));
+        when(idrepoDraftService.idrepoCreateDraft(REG_ID, null)).thenReturn(true);
 
         MessageDTO result = createDraftStage.process(messageDTO);
 
         assertTrue(result.getIsValid());
         assertFalse(result.getInternalError());
         verify(idrepoDraftService, times(1)).idrepoDiscardDraft(REG_ID);
-        verify(idrepoDraftService, times(1)).idrepoCreateDraft(REG_ID, ALLOCATED_UIN);
+        verify(idrepoDraftService, times(1)).idrepoCreateDraft(REG_ID, null);
     }
 
     // -----------------------------------------------------------------------
@@ -198,7 +181,6 @@ public class CreateDraftStageTest {
         assertTrue(result.getIsValid());
         assertFalse(result.getInternalError());
         verify(idrepoDraftService, times(1)).idrepoCreateDraft(REG_ID, EXISTING_UIN);
-        verify(registrationProcessorRestClientService, never()).getApi(any(), any(), anyString(), anyString(), any());
     }
 
     // -----------------------------------------------------------------------
@@ -235,44 +217,31 @@ public class CreateDraftStageTest {
     // -----------------------------------------------------------------------
 
     @Test
-    public void testProcess_NewPacket_UinAllocationFails_InternalError() throws Exception {
+    public void testProcess_NewPacket_DraftCreationReturnsFalse_InternalError() throws Exception {
         messageDTO.setReg_type("NEW");
 
         when(idrepoDraftService.idrepoHasDraft(REG_ID)).thenReturn(false);
-        when(registrationProcessorRestClientService.getApi(
-                eq(ApiName.UINGENERATOR), any(), anyString(), anyString(), any()))
-                .thenThrow(new ApisResourceAccessException("UIN Generator service unavailable"));
+        when(idrepoDraftService.idrepoCreateDraft(REG_ID, null)).thenReturn(false);
 
         MessageDTO result = createDraftStage.process(messageDTO);
 
         assertFalse(result.getIsValid());
         assertTrue(result.getInternalError());
-        verify(idrepoDraftService, never()).idrepoCreateDraft(anyString(), anyString());
+        verify(idrepoDraftService, times(1)).idrepoCreateDraft(REG_ID, null);
     }
 
     @Test
-    public void testProcess_NewPacket_UinGeneratorReturnsError_InternalError() throws Exception {
+    public void testProcess_NewPacket_CreateDraftThrowsApiException_InternalError() throws Exception {
         messageDTO.setReg_type("NEW");
 
         when(idrepoDraftService.idrepoHasDraft(REG_ID)).thenReturn(false);
-
-        UinGenResponseDto errorResponse = new UinGenResponseDto();
-        List<ErrorDTO> errors = new ArrayList<>();
-        ErrorDTO errorDTO = new ErrorDTO();
-        errorDTO.setErrorCode("KER-IDG-001");
-        errorDTO.setMessage("UIN pool exhausted");
-        errors.add(errorDTO);
-        errorResponse.setErrors(errors);
-
-        when(registrationProcessorRestClientService.getApi(
-                eq(ApiName.UINGENERATOR), any(), anyString(), anyString(), any()))
-                .thenReturn(errorResponse);
+        when(idrepoDraftService.idrepoCreateDraft(REG_ID, null))
+                .thenThrow(new ApisResourceAccessException("ID Repo not reachable"));
 
         MessageDTO result = createDraftStage.process(messageDTO);
 
         assertFalse(result.getIsValid());
         assertTrue(result.getInternalError());
-        verify(idrepoDraftService, never()).idrepoCreateDraft(anyString(), anyString());
     }
 
     @Test
@@ -295,10 +264,7 @@ public class CreateDraftStageTest {
         messageDTO.setReg_type("NEW");
 
         when(idrepoDraftService.idrepoHasDraft(REG_ID)).thenReturn(false);
-        when(registrationProcessorRestClientService.getApi(
-                eq(ApiName.UINGENERATOR), any(), anyString(), anyString(), any()))
-                .thenReturn(buildUinGenResponse(ALLOCATED_UIN));
-        when(idrepoDraftService.idrepoCreateDraft(REG_ID, ALLOCATED_UIN))
+        when(idrepoDraftService.idrepoCreateDraft(REG_ID, null))
                 .thenThrow(new IdrepoDraftException("CDS-001", "Draft creation failed"));
 
         MessageDTO result = createDraftStage.process(messageDTO);
@@ -322,16 +288,4 @@ public class CreateDraftStageTest {
         assertTrue(result.getInternalError());
     }
 
-    // -----------------------------------------------------------------------
-    // Helpers
-    // -----------------------------------------------------------------------
-
-    private UinGenResponseDto buildUinGenResponse(String uin) {
-        UinGenResponseDto response = new UinGenResponseDto();
-        UinResponseDto uinResp = new UinResponseDto();
-        uinResp.setUin(uin);
-        uinResp.setStatus("ASSIGNED");
-        response.setResponse(uinResp);
-        return response;
-    }
 }
