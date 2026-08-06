@@ -13,6 +13,7 @@ import io.mosip.kernel.idvalidator.vid.impl.VidValidatorImpl;
 import io.mosip.registration.processor.packet.storage.helper.PacketManagerHelper;
 import io.mosip.registration.processor.packet.storage.utils.PacketManagerService;
 import io.mosip.registration.processor.packet.storage.utils.PriorityBasedPacketManagerService;
+import io.mosip.registration.processor.packet.storage.utils.StaleReprocessChecker;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -133,4 +134,7 @@ public class PacketStorageBeanConfig {
 	
 	@Bean
 	public VidValidator<String> vidValidator(){return new VidValidatorImpl();}
+
+	@Bean
+	public StaleReprocessChecker staleReprocessChecker(){return new StaleReprocessChecker();}
 }
