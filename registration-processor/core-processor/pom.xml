@@ -16,7 +16,6 @@
   	<modules>
 		<module>registration-processor-demo-dedupe-stage</module>
         <module>registration-processor-bio-dedupe-stage</module>
-        <module>registration-processor-uin-generator-stage</module>
         <module>registration-processor-abis</module>
 		<module>registration-processor-manual-adjudication-stage</module>
         <module>registration-processor-abis-handler-stage</module>
