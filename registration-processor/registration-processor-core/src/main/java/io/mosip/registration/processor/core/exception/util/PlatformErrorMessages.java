@@ -1470,6 +1470,8 @@ public enum PlatformErrorMessages {
 			"Create draft stage failed"),
 	RPR_CDS_UIN_NOT_FOUND_FOR_UPDATE(PlatformConstants.RPR_CREATE_DRAFT_STAGE + "002",
 			"UIN not found for UPDATE packet"),
+	RPR_CDS_API_RESOURCE_EXCEPTION(PlatformConstants.RPR_CREATE_DRAFT_STAGE + "003",
+			"Not able to access the API resource"),
 	;
 
 

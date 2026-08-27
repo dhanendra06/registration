@@ -185,28 +185,38 @@ public class IdrepoDraftService {
         }
     }
 
-    public boolean idrepoCreateDraft(String id, String uin) throws ApisResourceAccessException, IdrepoDraftException {
-        regProcLogger.debug("idrepoCreateDraft entry " + id);
-        String queryParam = uin != null ? UIN : null;
-        String queryParamValue = uin != null ? uin : null;
-
-        ResponseWrapper response = (ResponseWrapper) registrationProcessorRestClientService.postApi(
-                ApiName.IDREPOCREATEDRAFT, Lists.newArrayList(id), queryParam, queryParamValue, null, ResponseWrapper.class);
-        if (response.getErrors() != null && !response.getErrors().isEmpty())
-        {
-            List<ErrorDTO> error=response.getErrors();
-            regProcLogger.error("Error while creating draft for id " + id);
-            throw new IdrepoDraftException(error.get(0).getErrorCode(), error.get(0).getMessage());
-        }
-        return (response.getErrors() == null || response.getErrors().isEmpty());
-    }
-
+    /**
+     * @deprecated Kept for {@code UinGeneratorStage} only — that stage is being removed from the
+     *             pipeline. Create Draft and all new code must use {@link #idrepoUpdateDraftV2}.
+     *             Do not call this method elsewhere.
+     */
+    @Deprecated
     public IdResponseDTO idrepoUpdateDraft(String id, String uin, IdRequestDto idRequestDto)
             throws ApisResourceAccessException, IdrepoDraftException, IOException, IdrepoDraftReprocessableException {
         regProcLogger.debug("idrepoUpdateDraft entry " + id);
+        boolean generateUin = (uin == null || uin.isEmpty() || "null".equalsIgnoreCase(uin));
+        return idrepoUpdateDraftInternal(id, uin, idRequestDto, generateUin);
+    }
+
+    /**
+     * Create Draft stage entry point — same create-if-absent / merge-if-present flow as
+     * {@link #idrepoUpdateDraft}, but {@code generateUin} is supplied explicitly for
+     * createDraftV2. Pass {@code null} or {@code true} for NEW, UPDATE, ACTIVATED, and
+     * DEACTIVATED. Pass {@code false} only for LOST (bare draft; UIN is stamped later in Bio Dedupe).
+     */
+    public IdResponseDTO idrepoUpdateDraftV2(String id, String uin, IdRequestDto idRequestDto, Boolean generateUin)
+            throws ApisResourceAccessException, IdrepoDraftException, IOException, IdrepoDraftReprocessableException {
+        regProcLogger.debug("idrepoUpdateDraftV2 entry " + id + " generateUin=" + generateUin);
+        boolean effectiveGenerateUin = (generateUin == null) ? true : generateUin.booleanValue();
+        return idrepoUpdateDraftInternal(id, uin, idRequestDto, effectiveGenerateUin);
+    }
+
+    private IdResponseDTO idrepoUpdateDraftInternal(String id, String uin, IdRequestDto idRequestDto,
+            boolean generateUin)
+            throws ApisResourceAccessException, IdrepoDraftException, IOException, IdrepoDraftReprocessableException {
         if (!idrepoHasDraft(id)) {
             regProcLogger.info("Existing draft not found for id " + id + ". Creating new draft.");
-            idrepoCreateDraft(id, uin);
+            idrepoCreateDraftV2(id, uin, generateUin);
         } else {
             regProcLogger.info("Existing draft found for id " + id + ". Updating uin in demographic identity.");
             ResponseDTO responseDTO = idrepoGetDraft(id);

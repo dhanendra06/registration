@@ -306,6 +306,14 @@ public enum RegistrationExceptionTypeCode {
 
 	INTRODUCER_BIOMETRIC_ALL_EXCEPTION_IN_PACKET,
 
+	/** The packet create draft failed. */
+	PACKET_CREATE_DRAFT_FAILED,
+
+	/** The packet create draft reprocess. */
+	PACKET_CREATE_DRAFT_REPROCESS,
+
+	/** The packet create draft id repo error. */
+	PACKET_CREATE_DRAFT_ID_REPO_ERROR,
 
 	IDREPO_DRAFT_REPROCESSABLE_EXCEPTION;
 

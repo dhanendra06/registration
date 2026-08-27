@@ -187,6 +187,12 @@ public class RegistrationExceptionMapperUtil {
 		statusMap.put(RegistrationExceptionTypeCode.BIOMETRIC_EXCEPTION, RegistrationTransactionStatusCode.REPROCESS);
 		statusMap.put(RegistrationExceptionTypeCode.PACKET_UIN_GENERATION_ID_REPO_ERROR,
 				RegistrationTransactionStatusCode.REPROCESS);
+		statusMap.put(RegistrationExceptionTypeCode.PACKET_CREATE_DRAFT_FAILED,
+				RegistrationTransactionStatusCode.FAILED);
+		statusMap.put(RegistrationExceptionTypeCode.PACKET_CREATE_DRAFT_REPROCESS,
+				RegistrationTransactionStatusCode.REPROCESS);
+		statusMap.put(RegistrationExceptionTypeCode.PACKET_CREATE_DRAFT_ID_REPO_ERROR,
+				RegistrationTransactionStatusCode.REPROCESS);
 		statusMap.put(RegistrationExceptionTypeCode.BIOMETRIC_TYPE_EXCEPTION,
 				RegistrationTransactionStatusCode.REPROCESS);
 		statusMap.put(RegistrationExceptionTypeCode.AUTH_SYSTEM_EXCEPTION, RegistrationTransactionStatusCode.REPROCESS);
