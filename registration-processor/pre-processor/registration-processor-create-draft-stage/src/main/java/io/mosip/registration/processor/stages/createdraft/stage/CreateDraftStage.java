@@ -280,7 +280,7 @@ public class CreateDraftStage extends MosipVerticleAPIManager {
                     uinExecutor.close();
                 }
 
-                if (!handleStaleCheck(registrationId, uinField, registrationStatusDto, object, description)) {
+                if (!handleStaleCheck(registrationId, uinField, packetCreatedOn, object, description)) {
                     return object;
                 }
 
@@ -1182,30 +1182,30 @@ public class CreateDraftStage extends MosipVerticleAPIManager {
      * @return {@code true} to continue processing; {@code false} if the caller should return immediately
      */
     private boolean handleStaleCheck(String registrationId, String uinField,
-            InternalRegistrationStatusDto registrationStatusDto, MessageDTO object, LogDescription description) {
+            String packetCreatedOn, MessageDTO object, LogDescription description) {
         StaleCheckResult staleCheck = utility.isLatestPacket(uinField,
-                registrationStatusDto.getPacketCreateDateTime(), registrationId);
+                packetCreatedOn, registrationId);
         if (staleCheck == StaleCheckResult.STALE) {
-            regProcLogger.warn(LoggerFileConstant.SESSIONID.toString(),
+            regProcLogger.error(LoggerFileConstant.SESSIONID.toString(),
                     LoggerFileConstant.REGISTRATIONID.toString(), registrationId,
-                    "CreateDraftStage :: Stale reprocess detected. reg_type=" + object.getReg_type()
-                            + " pkt_cr_dtimes=" + registrationStatusDto.getPacketCreateDateTime());
+                    "handleStaleCheck :: Stale packet reprocess detected. packet type : " + object.getReg_type()
+                            + " packetCreatedOn : " + packetCreatedOn);
             markAsObsoleted(object, description);
             return false;
         }
         if (staleCheck == StaleCheckResult.UNAVAILABLE) {
             regProcLogger.warn(LoggerFileConstant.SESSIONID.toString(),
                     LoggerFileConstant.REGISTRATIONID.toString(), registrationId,
-                    "CreateDraftStage :: Stale check unavailable — scheduling reprocess.");
+                    "handleStaleCheck :: Stale check unavailable — scheduling reprocess.");
             description.setStatusCode(RegistrationStatusCode.PROCESSING.name());
             description.setStatusComment(trimExceptionMessage.trimExceptionMessage(
-                    StatusUtil.API_RESOUCE_ACCESS_FAILED.getMessage()));
-            description.setSubStatusCode(StatusUtil.API_RESOUCE_ACCESS_FAILED.getCode());
+                    StatusUtil.CREATE_DRAFT_UNABLE_TO_CHECK_STALE.getMessage()));
+            description.setSubStatusCode(StatusUtil.CREATE_DRAFT_UNABLE_TO_CHECK_STALE.getCode());
             description.setTransactionStatusCode(registrationStatusMapperUtil
-                    .getStatusCode(RegistrationExceptionTypeCode.APIS_RESOURCE_ACCESS_EXCEPTION));
+                    .getStatusCode(RegistrationExceptionTypeCode.PACKET_CREATE_DRAFT_REPROCESS));
             object.setInternalError(Boolean.TRUE);
-            description.setMessage(StatusUtil.API_RESOUCE_ACCESS_FAILED.getMessage());
-            description.setCode(PlatformErrorMessages.RPR_CDS_API_RESOURCE_EXCEPTION.getCode());
+            description.setMessage(StatusUtil.CREATE_DRAFT_UNABLE_TO_CHECK_STALE.getMessage());
+            description.setCode(PlatformErrorMessages.RPR_CDS_UNABLE_TO_CHECK_STALE.getCode());
             return false;
         }
         return true;

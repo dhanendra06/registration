@@ -1453,6 +1453,8 @@ public enum PlatformErrorMessages {
 			"Draft request is unavaialble in id-repo draft repository."),
 	RPR_FINALIZATION_STAGE_API_RESOURCE_EXCEPTION(PlatformConstants.RPR_FINALIZATION_STAGE + "004",
 			"Not able to access the API resource"),
+	RPR_FINALIZATION_UNABLE_TO_CHECK_STALE(PlatformConstants.RPR_FINALIZATION_STAGE + "005",
+			"Unable to complete stale packet check"),
 
 	INDIVIDUAL_BIOMETRIC_AUTHENTICATION_FAILED(PlatformConstants.RPR_BIOMETRIC_AUTHENTICATION_MODULE + "004",
 			"Bio authentication failed"),
@@ -1472,6 +1474,8 @@ public enum PlatformErrorMessages {
 			"UIN not found for UPDATE packet"),
 	RPR_CDS_API_RESOURCE_EXCEPTION(PlatformConstants.RPR_CREATE_DRAFT_STAGE + "003",
 			"Not able to access the API resource"),
+	RPR_CDS_UNABLE_TO_CHECK_STALE(PlatformConstants.RPR_CREATE_DRAFT_STAGE + "004",
+			"Unable to complete stale packet check"),
 	;
 
 

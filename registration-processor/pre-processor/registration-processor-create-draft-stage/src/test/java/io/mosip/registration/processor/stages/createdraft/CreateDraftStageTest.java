@@ -125,7 +125,7 @@ public class CreateDraftStageTest {
         when(registrationStatusService.getRegistrationStatus(anyString(), any(), any(), any()))
                 .thenReturn(registrationStatusDto);
         when(registrationStatusMapperUtil.getStatusCode(any())).thenReturn("ERROR");
-        when(utility.isLatestPacket(any(), any(), any())).thenReturn(StaleCheckResult.NOT_STALE);
+        when(utility.isLatestPacket(anyString(), anyString(), anyString())).thenReturn(StaleCheckResult.NOT_STALE);
 
         // Populate-draft path stubs: make the new code in process() succeed without
         // forcing every test to re-stub them. Tests that need different behaviour can
@@ -533,7 +533,7 @@ public class CreateDraftStageTest {
     public void testProcess_StaleCheckUnavailable_TriggersReprocess() throws Exception {
         messageDTO.setReg_type("NEW");
 
-        when(utility.isLatestPacket(any(), any(), any()))
+        when(utility.isLatestPacket(anyString(), anyString(), anyString()))
                 .thenReturn(StaleCheckResult.UNAVAILABLE);
 
         MessageDTO result = createDraftStage.process(messageDTO);
@@ -553,7 +553,7 @@ public class CreateDraftStageTest {
         registrationStatusDto.setRegistrationType("UPDATE");
 
         when(utility.getUIn(anyString(), anyString(), any())).thenReturn(EXISTING_UIN);
-        when(utility.isLatestPacket(any(), any(), any())).thenReturn(StaleCheckResult.STALE);
+        when(utility.isLatestPacket(anyString(), anyString(), anyString())).thenReturn(StaleCheckResult.STALE);
 
         MessageDTO result = createDraftStage.process(messageDTO);
 
@@ -661,7 +661,7 @@ public class CreateDraftStageTest {
         messageDTO.setReg_type("NEW");
         registrationStatusDto.setRegistrationType("NEW");
 
-        when(utility.isLatestPacket(any(), any(), any())).thenReturn(StaleCheckResult.STALE);
+        when(utility.isLatestPacket(anyString(), anyString(), anyString())).thenReturn(StaleCheckResult.STALE);
 
         MessageDTO result = createDraftStage.process(messageDTO);
 
@@ -682,7 +682,7 @@ public class CreateDraftStageTest {
         registrationStatusDto.setRegistrationType("UPDATE");
 
         when(utility.getUIn(anyString(), anyString(), any())).thenReturn(EXISTING_UIN);
-        when(utility.isLatestPacket(any(), any(), any())).thenReturn(StaleCheckResult.STALE);
+        when(utility.isLatestPacket(anyString(), anyString(), anyString())).thenReturn(StaleCheckResult.STALE);
 
         MessageDTO result = createDraftStage.process(messageDTO);
 
@@ -702,7 +702,7 @@ public class CreateDraftStageTest {
         registrationStatusDto.setRegistrationType("RES_UPDATE");
 
         when(utility.getUIn(anyString(), anyString(), any())).thenReturn(EXISTING_UIN);
-        when(utility.isLatestPacket(any(), any(), any())).thenReturn(StaleCheckResult.STALE);
+        when(utility.isLatestPacket(anyString(), anyString(), anyString())).thenReturn(StaleCheckResult.STALE);
 
         MessageDTO result = createDraftStage.process(messageDTO);
 
@@ -776,7 +776,7 @@ public class CreateDraftStageTest {
         registrationStatusDto.setRegistrationType("ACTIVATED");
 
         when(utility.getUIn(anyString(), anyString(), any())).thenReturn(EXISTING_UIN);
-        when(utility.isLatestPacket(any(), any(), any())).thenReturn(StaleCheckResult.STALE);
+        when(utility.isLatestPacket(anyString(), anyString(), anyString())).thenReturn(StaleCheckResult.STALE);
 
         MessageDTO result = createDraftStage.process(messageDTO);
 
@@ -800,7 +800,7 @@ public class CreateDraftStageTest {
         messageDTO.setReg_type("LOST");
         registrationStatusDto.setRegistrationType("LOST");
 
-        when(utility.isLatestPacket(any(), any(), any())).thenReturn(StaleCheckResult.STALE);
+        when(utility.isLatestPacket(anyString(), anyString(), anyString())).thenReturn(StaleCheckResult.STALE);
 
         MessageDTO result = createDraftStage.process(messageDTO);
 

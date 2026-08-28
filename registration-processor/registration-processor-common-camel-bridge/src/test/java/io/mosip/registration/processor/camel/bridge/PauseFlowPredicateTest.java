@@ -102,6 +102,13 @@ public class PauseFlowPredicateTest {
 		exchange = new DefaultExchange(endpoint);
 	}
 
+	private void assertResumeTimestampWithinPauseWindow(LocalDateTime beforeMatch, LocalDateTime afterMatch,
+			long pauseForSeconds, String resumeTimestampIso) {
+		LocalDateTime resumeTimestamp = DateUtils2.parseToLocalDateTime(resumeTimestampIso);
+		assertFalse(resumeTimestamp.isBefore(beforeMatch.plusSeconds(pauseForSeconds)));
+		assertFalse(resumeTimestamp.isAfter(afterMatch.plusSeconds(pauseForSeconds)));
+	}
+
 	@SuppressWarnings("unchecked")
 	@Test
 	public void testRoutePredicatePositive() throws Exception {
@@ -113,12 +120,12 @@ public class PauseFlowPredicateTest {
 		tags.put("ID_OBJECT-residenceStatus", "nonResident");
 		messageDTO.setTags(tags);
 		exchange.getMessage().setBody(objectMapper.writeValueAsString(messageDTO));
-		LocalDateTime dateTimeBefore = DateUtils2.getUTCCurrentDateTime().plusSeconds(432000);
+		LocalDateTime beforeMatch = DateUtils2.getUTCCurrentDateTime();
 		assertTrue(pauseFlowPredicate.matches(exchange));
-		LocalDateTime dateTimeAfter = DateUtils2.getUTCCurrentDateTime().plusSeconds(432000);
+		LocalDateTime afterMatch = DateUtils2.getUTCCurrentDateTime();
 		JsonObject json = new JsonObject((String) exchange.getMessage().getBody());
 		assertEquals("STOP_PROCESSING", json.getString("defaultResumeAction"));
-		assertTrue(dateTimeBefore.isBefore(DateUtils2.parseToLocalDateTime(json.getString("resumeTimestamp"))) && dateTimeAfter.isAfter(DateUtils2.parseToLocalDateTime(json.getString("resumeTimestamp"))));
+		assertResumeTimestampWithinPauseWindow(beforeMatch, afterMatch, 432000, json.getString("resumeTimestamp"));
 		WorkflowInternalActionDTO workflowInternalActionDTO = objectMapper
 				.readValue(exchange.getMessage().getBody().toString(), WorkflowInternalActionDTO.class);
 		assertEquals(WorkflowInternalActionCode.MARK_AS_PAUSED.toString(),
@@ -202,12 +209,12 @@ public class PauseFlowPredicateTest {
 		tags.put("PAUSE_IMMUNITY_RULE_IDS", "NON_RESIDENT_CHILD_APPLICANT");
 		messageDTO.setTags(tags);
 		exchange.getMessage().setBody(objectMapper.writeValueAsString(messageDTO));
-		LocalDateTime dateTimeBefore = DateUtils2.getUTCCurrentDateTime().plusSeconds(432000);
+		LocalDateTime beforeMatch = DateUtils2.getUTCCurrentDateTime();
 		assertTrue(pauseFlowPredicate.matches(exchange));
-		LocalDateTime dateTimeAfter = DateUtils2.getUTCCurrentDateTime().plusSeconds(432000);
+		LocalDateTime afterMatch = DateUtils2.getUTCCurrentDateTime();
 		JsonObject json = new JsonObject((String) exchange.getMessage().getBody());
 		assertEquals("STOP_PROCESSING", json.getString("defaultResumeAction"));
-		assertTrue(dateTimeBefore.isBefore(DateUtils2.parseToLocalDateTime(json.getString("resumeTimestamp"))) && dateTimeAfter.isAfter(DateUtils2.parseToLocalDateTime(json.getString("resumeTimestamp"))));
+		assertResumeTimestampWithinPauseWindow(beforeMatch, afterMatch, 432000, json.getString("resumeTimestamp"));
 		WorkflowInternalActionDTO workflowInternalActionDTO = objectMapper
 				.readValue(exchange.getMessage().getBody().toString(), WorkflowInternalActionDTO.class);
 		assertEquals(WorkflowInternalActionCode.MARK_AS_PAUSED.toString(),

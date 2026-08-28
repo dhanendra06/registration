@@ -392,7 +392,7 @@ public class IdrepoDraftServiceTest {
 
     @Test
     public void idrepoUpdateDraftUinSuccessTest() throws ApisResourceAccessException, IdrepoDraftException, IdrepoDraftReprocessableException {
-        when(mapper.createObjectNode()).thenReturn(new ObjectMapper().createObjectNode());
+        when(mapper.createObjectNode()).thenReturn(new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode());
         ArgumentCaptor<ObjectNode> bodyCaptor = ArgumentCaptor.forClass(ObjectNode.class);
         when(registrationProcessorRestClientService.patchApi(
                 eq(ApiName.IDREPOUPDATEDRAFTUIN), any(), any(), any(), any(), any())).thenReturn(idResponseDTO);
@@ -413,7 +413,7 @@ public class IdrepoDraftServiceTest {
         IdResponseDTO errorResponse = new IdResponseDTO();
         errorResponse.setErrors(Lists.newArrayList(errorDTO));
 
-        when(mapper.createObjectNode()).thenReturn(new ObjectMapper().createObjectNode());
+        when(mapper.createObjectNode()).thenReturn(new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode());
         when(registrationProcessorRestClientService.patchApi(
                 eq(ApiName.IDREPOUPDATEDRAFTUIN), any(), any(), any(), any(), any())).thenReturn(errorResponse);
 
@@ -422,7 +422,7 @@ public class IdrepoDraftServiceTest {
 
     @Test(expected = IdrepoDraftException.class)
     public void idrepoUpdateDraftUinNullResponseTest() throws ApisResourceAccessException, IdrepoDraftException, IdrepoDraftReprocessableException {
-        when(mapper.createObjectNode()).thenReturn(new ObjectMapper().createObjectNode());
+        when(mapper.createObjectNode()).thenReturn(new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode());
         when(registrationProcessorRestClientService.patchApi(
                 eq(ApiName.IDREPOUPDATEDRAFTUIN), any(), any(), any(), any(), any())).thenReturn(null);
 
@@ -480,7 +480,7 @@ public class IdrepoDraftServiceTest {
         IdResponseDTO keyManagerErrorResponse = new IdResponseDTO();
         keyManagerErrorResponse.setErrors(Lists.newArrayList(keyManagerError));
 
-        when(mapper.createObjectNode()).thenReturn(new ObjectMapper().createObjectNode());
+        when(mapper.createObjectNode()).thenReturn(new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode());
         when(registrationProcessorRestClientService.patchApi(
                 eq(ApiName.IDREPOUPDATEDRAFTUIN), any(), any(), any(), any(), any()))
                 .thenReturn(keyManagerErrorResponse)
@@ -499,7 +499,7 @@ public class IdrepoDraftServiceTest {
         IdResponseDTO keyManagerErrorResponse = new IdResponseDTO();
         keyManagerErrorResponse.setErrors(Lists.newArrayList(keyManagerError));
 
-        when(mapper.createObjectNode()).thenReturn(new ObjectMapper().createObjectNode());
+        when(mapper.createObjectNode()).thenReturn(new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode());
         when(registrationProcessorRestClientService.patchApi(
                 eq(ApiName.IDREPOUPDATEDRAFTUIN), any(), any(), any(), any(), any()))
                 .thenReturn(keyManagerErrorResponse);
